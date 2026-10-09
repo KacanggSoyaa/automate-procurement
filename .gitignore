@@ -1,0 +1,30 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Tooling
+.vscode/
+.idea/
+
+# AI response cache
+data/.ai_cache/
+
+# Generated outputs
+outputs/*
+!outputs/.gitkeep
+
+# Confidential input documents (do not publish)
+data/itb/*
+!data/itb/.gitkeep
+
+# Vendor data (keep only the template)
+data/vendors/vendor_list.csv
+data/specs/*
+!data/specs/.gitkeep

@@ -1,0 +1,17 @@
+app:
+  name: automate-procurement
+  version: 0.1.0
+
+paths:
+  itb_dir: ./data/itb
+  spec_dir: ./data/specs
+  vendor_dir: ./data/vendors
+  output_dir: ./outputs
+
+extraction:
+  pdf_engine: pdfplumber
+  ocr_enabled: false
+
+generation:
+  template_dir: ./templates
+  default_format: docx
