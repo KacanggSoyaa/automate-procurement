@@ -150,8 +150,9 @@ class AIProcessor:
                 except Exception as e:
                     last_err = e
                     msg = str(e)
+                    daily_quota = "PerDay" in msg or "current quota" in msg
                     transient = any(c in msg for c in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "overloaded"))
-                    if not transient:
+                    if not transient or daily_quota:
                         break
                     delay = min(60, 2 ** attempt) + random.uniform(0, 1)
                     time.sleep(delay)

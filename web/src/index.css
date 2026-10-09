@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --color-space-950: #03040a;
+  --color-space-900: #05070f;
+  --color-space-800: #0a0e1a;
+
+  --color-ink-950: #0f1117;
+  --color-ink-900: #12141c;
+  --color-ink-800: #1a1d29;
+  --color-ink-700: #242836;
+  --color-ink-600: #333849;
+
+  --color-paper-50: #f3f5f7;
+  --color-paper-100: #ffffff;
+  --color-paper-200: #e4e7ec;
+
+  --color-amber: #e8a33d;
+  --color-amber-light: #f0b85f;
+  --color-teal: #5ec8c0;
+  --color-danger: #ff6568;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-space-950);
+  color: var(--color-paper-50);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-amber);
+  color: var(--color-space-950);
+}
+
+/* Subtle grid backdrop */
+.bg-grid {
+  background-image: linear-gradient(rgba(94, 200, 192, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(94, 200, 192, 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #242836;
+  border-radius: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}

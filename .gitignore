@@ -28,3 +28,13 @@ data/itb/*
 data/vendors/vendor_list.csv
 data/specs/*
 !data/specs/.gitkeep
+
+# Server runtime (uploaded jobs + working copies)
+data/uploads/
+data/workspaces/
+
+# Frontend
+web/node_modules/
+web/dist/
+web/.vite/
+*.tsbuildinfo

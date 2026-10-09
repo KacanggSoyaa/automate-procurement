@@ -1,0 +1,65 @@
+from pathlib import Path
+from typing import List, Optional
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+
+from .jobs import job_manager
+
+app = FastAPI(title="Automate Procurement API", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/api/jobs")
+async def create_job(
+    files: List[UploadFile] = File(...),
+    model: Optional[str] = Form(None),
+    include_images: bool = Form(True),
+    pattern: str = Form("*"),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded.")
+    job = job_manager.create(files, model=model, include_images=include_images, pattern=pattern)
+    return job.to_dict()
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job(job_id: str):
+    job = job_manager.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return job.to_dict()
+
+
+@app.get("/api/jobs/{job_id}/download")
+def download(job_id: str):
+    job = job_manager.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    if job.status != "done" or not job.output_path or not Path(job.output_path).exists():
+        raise HTTPException(status_code=409, detail="Result not ready.")
+    return FileResponse(
+        job.output_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename="specification_sheet.docx",
+    )
