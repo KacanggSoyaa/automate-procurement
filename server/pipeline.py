@@ -40,10 +40,14 @@ def run_pipeline(
     emit("extract", 1, 1, f"Read {len(ok)} PDF file(s)")
     content = "\n\n".join(r.get("content", "") for r in ok)
 
+    source_files = [r["filename"] for r in ok]
+
     image_paths = []
     if include_images:
         emit("images", 0, 1, "Collecting images / screenshots...")
-        image_paths += pdf_ext.collect_image_files(input_dir)
+        screenshots = pdf_ext.collect_image_files(input_dir)
+        image_paths += screenshots
+        source_files += [Path(p).name for p in screenshots]
         render_dir = str(Path(output_path).parent / "extracted_images")
         for r in ok:
             image_paths += pdf_ext.render_image_pages(r["path"], render_dir)
@@ -60,6 +64,7 @@ def run_pipeline(
     extracted_data = {
         "files_processed": len(ok),
         "summary": f"Analyzed {len(ok)} ITB document(s)",
+        "source_files": source_files,
         "meta": reqs.get("meta", {}),
         "line_items": line_items,
         "line_items_count": len(line_items),

@@ -96,6 +96,25 @@ export default function Results({ job }: { job: Job }) {
           Download specification sheet (.docx)
         </a>
       )}
+
+      {result.source_files.length > 0 && (
+        <div className="rounded-lg border border-ink-700 bg-ink-900/40 p-4">
+          <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-paper-200/70">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <path d="M14 2v6h6" />
+            </svg>
+            Source documents (evidence)
+          </div>
+          <ul className="space-y-1">
+            {result.source_files.map((name) => (
+              <li key={name} className="font-mono text-xs text-paper-200">
+                <span className="text-amber">›</span> {name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

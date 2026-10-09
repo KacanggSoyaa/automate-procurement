@@ -49,6 +49,7 @@ class Job:
         d = self.data
         return {
             "files_processed": d.get("files_processed", 0),
+            "source_files": d.get("source_files", []),
             "line_items_count": d.get("line_items_count", 0),
             "line_items": d.get("line_items", [])[:100],
             "meta": d.get("meta", {}),

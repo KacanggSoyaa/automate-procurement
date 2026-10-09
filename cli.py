@@ -37,13 +37,16 @@ def extract(itb_dir, output, pattern, images, no_images, model):
     results = pdf_ext.extract_itb_folder(itb_dir, pattern=pattern)
     if not results:
         raise click.ClickException(f'No PDFs matching "{pattern}" found in {itb_dir}')
+    source_files = [r['filename'] for r in results if not r.get('error')]
     click.echo(f'  - {len(results)} file(s) matched "{pattern}"')
     all_content = '\n\n'.join([r.get('content', '') for r in results if not r.get('error')])
 
     image_paths = []
     if not no_images:
         globs = [g.strip() for g in images.split(',')] if images else None
-        image_paths += pdf_ext.collect_image_files(itb_dir, patterns=globs)
+        images_found = pdf_ext.collect_image_files(itb_dir, patterns=globs)
+        image_paths += images_found
+        source_files += [Path(p).name for p in images_found]
         for r in results:
             if not r.get('error'):
                 image_paths += pdf_ext.render_image_pages(r['path'], './outputs/extracted_images')
@@ -64,6 +67,7 @@ def extract(itb_dir, output, pattern, images, no_images, model):
     extracted_data = {
         'files_processed': len(results),
         'summary': f'Analyzed {len(results)} ITB documents from {itb_dir}',
+        'source_files': source_files,
         'meta': reqs.get('meta', {}),
         'line_items': line_items,
         'line_items_count': len(line_items),

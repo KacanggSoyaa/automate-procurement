@@ -184,6 +184,25 @@ class EnhancedSpecSheetGenerator:
             r.font.name = 'Calibri'
             r.font.size = Pt(10)
 
+    def _source_note(self, doc, source_files):
+        if not source_files:
+            return
+        doc.add_paragraph()
+        heading = doc.add_paragraph()
+        hr = heading.add_run("Source Documents (evidence):")
+        hr.font.name = 'Calibri'
+        hr.font.bold = True
+        hr.font.size = Pt(8.5)
+        hr.font.color.rgb = RGBColor(110, 110, 110)
+        heading.paragraph_format.space_after = Pt(2)
+        for name in source_files:
+            p = doc.add_paragraph(style='List Bullet')
+            r = p.add_run(name)
+            r.font.name = 'Calibri'
+            r.font.size = Pt(8.5)
+            r.font.color.rgb = RGBColor(110, 110, 110)
+            p.paragraph_format.space_after = Pt(0)
+
     def generate(self, extracted_data: dict, output_path: str):
         doc = docx.Document()
 
@@ -224,6 +243,8 @@ class EnhancedSpecSheetGenerator:
 
         self._add_heading_styled(doc, "3. Quotation Submission Instructions", level=1)
         self._instructions(doc, extracted_data.get('submission_rules', []))
+
+        self._source_note(doc, extracted_data.get("source_files", []))
 
         doc.save(output_path)
         return output_path

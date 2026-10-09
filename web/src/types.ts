@@ -15,6 +15,7 @@ export interface LineItem {
 
 export interface JobResult {
   files_processed: number;
+  source_files: string[];
   line_items_count: number;
   line_items: LineItem[];
   meta: {
