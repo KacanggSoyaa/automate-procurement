@@ -11,6 +11,7 @@ from extractors.pdf_extractor import PDFExtractor  # noqa: E402
 from extractors.office_extractor import OfficeExtractor  # noqa: E402
 from processors.ai_processor import AIProcessor  # noqa: E402
 from generators.enhanced_spec_sheet import EnhancedSpecSheetGenerator  # noqa: E402
+from generators.rfq_email_generator import RFQEmailGenerator  # noqa: E402
 
 ProgressCb = Optional[Callable[[str, int, int, str], None]]
 
@@ -106,6 +107,9 @@ def run_pipeline(
         "commercial_requirements": reqs["commercial"],
         "dates": reqs["dates"],
     }
+
+    # One copy-ready RFQ email per line item (deterministic, no API calls).
+    extracted_data["rfq_emails"] = RFQEmailGenerator().build_emails(extracted_data)
 
     emit("generate", 0, 1, "Generating specification sheet...")
     generator = EnhancedSpecSheetGenerator()

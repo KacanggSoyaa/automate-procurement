@@ -15,12 +15,19 @@ export interface LineItem {
   specs?: SpecPair[];
 }
 
+/** A copy-ready request-for-quotation email generated for one line item. */
+export interface RfqEmail {
+  subject: string;
+  body: string;
+}
+
 /** Trimmed result payload the API returns once a job is done. */
 export interface JobResult {
   files_processed: number;
   source_files: string[];
   line_items_count: number;
   line_items: LineItem[];
+  rfq_emails: RfqEmail[];
   meta: {
     project_ref?: string | null;
     project_title?: string | null;

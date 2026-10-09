@@ -3,6 +3,7 @@ import { createJob, getJob } from "./api";
 import DropZone from "./components/DropZone";
 import JobPanel from "./components/JobPanel";
 import Results from "./components/Results";
+import RfqEmails from "./components/RfqEmails";
 import SettingsPanel, { parseSkipList } from "./components/SettingsPanel";
 import type { Job } from "./types";
 
@@ -176,6 +177,7 @@ export default function App() {
           <div className="mt-5 space-y-5">
             <JobPanel job={job} />
             {job.status === "done" && <Results job={job} />}
+            {job.status === "done" && <RfqEmails emails={job.result?.rfq_emails ?? []} />}
           </div>
         )}
 

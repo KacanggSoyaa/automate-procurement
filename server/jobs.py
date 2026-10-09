@@ -57,6 +57,7 @@ class Job:
             "source_files": d.get("source_files", []),
             "line_items_count": d.get("line_items_count", 0),
             "line_items": d.get("line_items", [])[:100],
+            "rfq_emails": d.get("rfq_emails", []),
             "meta": d.get("meta", {}),
             "technical_count": len(d.get("technical_requirements", [])),
             "submission_count": len(d.get("submission_rules", [])),

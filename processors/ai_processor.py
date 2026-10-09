@@ -5,6 +5,7 @@ results on disk so repeat runs do not spend extra API quota.
 """
 import os
 import json
+import re
 import time
 import hashlib
 import random
@@ -19,6 +20,31 @@ try:
 except ImportError:
     genai = None
     types = None
+
+# A real quantity must start with a digit (e.g. "1.000", "5 Units"); phrases
+# like "ESTIMATED QTY FOR 3 YEARS" are not valid quantities.
+_QTY_RE = re.compile(r"^\s*\d")
+
+# Category headings the model sometimes returns as line items.
+_GENERIC_NAMES = {
+    "goods", "services", "material", "materials", "scope of work",
+    "bill of quantities", "price schedule", "schedule of rates",
+}
+_GENERIC_RE = re.compile(
+    r"^(procurement|supply|scope) of (material|materials|goods|service|services|work|works)\b",
+    re.I,
+)
+
+
+def _is_heading(name: str) -> bool:
+    """Return True when a name looks like a section/category heading, not an item."""
+    text = " ".join((name or "").split()).strip(" .:-")
+    text = re.sub(r"\s*\([^)]*\)\s*$", "", text).strip()  # drop a trailing "(EX-WORK)"
+    if not text:
+        return True
+    if text.lower() in _GENERIC_NAMES:
+        return True
+    return bool(_GENERIC_RE.match(text))
 
 
 class SpecPair(BaseModel):
@@ -65,7 +91,8 @@ SYSTEM_INSTRUCTION = (
     "  - specs: a list of {parameter, value} pairs for the item's technical specification key details, when available\n"
     "Only list an entry as a line item when it has a real item/material number, a quantity with unit, or concrete "
     "technical specifications. Never treat section headings, document titles, Incoterm labels (EX-WORK/EXW, DDP, FOB, "
-    "CIF, etc.) or procurement-category labels as line items.\n\n"
+    "CIF, etc.), procurement-category labels (e.g. 'PROCUREMENT OF MATERIAL', 'GOODS', 'SERVICES'), or estimate "
+    "phrases (e.g. 'ESTIMATED QTY FOR 3 YEARS') as line items.\n\n"
     "REQUIREMENTS are clauses, instructions, rules, conditions, evaluation criteria, terms and conditions, submission "
     "instructions, deadlines, HSE rules, legal text, boilerplate, etc. These are NOT line items and must NEVER be placed "
     "in line_items.\n\n"
@@ -228,6 +255,33 @@ class AIProcessor:
                 out.append(v)
         return out
 
+    @staticmethod
+    def _filter_items(items: List[LineItem]) -> List[Dict]:
+        """Keep only genuine line items; drop headings and Incoterm labels.
+
+        A real item must have a description and at least one of: an item
+        number, a numeric quantity, or a technical spec — and must not look
+        like a category heading.
+        """
+        seen, out = set(), []
+        for item in items:
+            desc = (item.description or item.item_name or "").strip()
+            has_number = bool((item.item_number or "").strip())
+            has_qty = bool(_QTY_RE.match((item.qty or "").strip()))
+            has_specs = any(
+                (s.parameter or "").strip() or (s.value or "").strip() for s in item.specs
+            )
+            keep = desc and not _is_heading(item.item_name or desc) and (
+                has_number or has_qty or has_specs
+            )
+            if not keep:
+                continue
+            key = (" ".join(desc.lower().split()), item.item_number, item.qty)
+            if key not in seen:
+                seen.add(key)
+                out.append(item.model_dump())
+        return out
+
     def classify(self, text: str, image_paths: List[str] = None, progress=None) -> Dict:
         """Classify all text chunks and images, then return cleaned results.
 
@@ -248,23 +302,7 @@ class AIProcessor:
                 progress('images', 1, 1)
             self._merge(merged, meta, self._classify_images(image_paths))
 
-        seen_items, line_items = set(), []
-        for item in merged.line_items:
-            desc = (item.description or item.item_name or "").strip()
-            # Guard against headings / Incoterm labels that the model may
-            # return as items: a real line item must carry an item number, a
-            # quantity or at least one technical spec.
-            has_number = bool((item.item_number or "").strip())
-            has_qty = bool((item.qty or "").strip())
-            has_specs = any(
-                (s.parameter or "").strip() or (s.value or "").strip() for s in item.specs
-            )
-            if not (desc and (has_number or has_qty or has_specs)):
-                continue
-            key = (" ".join(desc.lower().split()), item.item_number, item.qty)
-            if key not in seen_items:
-                seen_items.add(key)
-                line_items.append(item.model_dump())
+        line_items = self._filter_items(merged.line_items)
 
         return {
             "line_items": line_items,
