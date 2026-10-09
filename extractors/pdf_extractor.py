@@ -1,16 +1,23 @@
+"""PDF text and image extraction utilities for ITB packages."""
 import os
 import fnmatch
 import pdfplumber
 from pathlib import Path
 from typing import Dict, List
 
+# Extensions treated as standalone images (screenshots) inside an ITB folder.
 IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff')
 
+
 class PDFExtractor:
+    """Reads text out of PDFs and finds images/screenshots in a folder."""
+
     def __init__(self, engine: str = "pdfplumber"):
+        """Store the extraction engine name (currently only pdfplumber)."""
         self.engine = engine
 
     def extract_text_from_pdf(self, pdf_path: str) -> str:
+        """Return the concatenated text of every page in a single PDF."""
         text = []
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
@@ -20,6 +27,11 @@ class PDFExtractor:
         return "\n".join(text)
 
     def extract_itb_folder(self, itb_dir: str, pattern: str = '*.pdf') -> List[Dict]:
+        """Read every PDF in a folder that matches a filename glob.
+
+        Returns one dict per file with keys ``filename``, ``path``, ``content``
+        and ``size``; unreadable files carry an ``error`` key and empty content.
+        """
         results = []
         for fname in os.listdir(itb_dir):
             if fname.lower().endswith('.pdf') and fnmatch.fnmatch(fname, pattern):

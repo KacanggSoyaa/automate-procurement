@@ -5,12 +5,17 @@ import JobPanel from "./components/JobPanel";
 import Results from "./components/Results";
 import type { Job } from "./types";
 
+/** Format a byte count as a short human-readable string (B / KB / MB). */
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * Root component: holds the selected files, starts a processing job and polls
+ * it until it finishes, then renders the results.
+ */
 export default function App() {
   const [files, setFiles] = useState<File[]>([]);
   const [job, setJob] = useState<Job | null>(null);
@@ -18,9 +23,11 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [includeImages, setIncludeImages] = useState(true);
 
+  // Total size of the selected files, shown in the file summary bar.
   const totalSize = useMemo(() => files.reduce((sum, f) => sum + f.size, 0), [files]);
   const running = busy || (job != null && (job.status === "queued" || job.status === "running"));
 
+  // Poll the job every 1.5s until it is done or has errored.
   useEffect(() => {
     if (!job || job.status === "done" || job.status === "error") return;
     const timer = setTimeout(async () => {
@@ -33,6 +40,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [job]);
 
+  /** Merge newly dropped files into the list, skipping duplicate names. */
   const onFiles = (incoming: File[]) => {
     const merged = [...files];
     const seen = new Set(files.map((f) => f.name));
@@ -47,6 +55,7 @@ export default function App() {
     setError(null);
   };
 
+  /** Upload the selected files and start a processing job. */
   const process = async () => {
     if (!files.length) return;
     setBusy(true);

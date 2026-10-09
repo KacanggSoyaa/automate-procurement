@@ -1,8 +1,10 @@
+/** A single technical specification (parameter -> value) for an item. */
 export interface SpecPair {
   parameter: string;
   value: string;
 }
 
+/** A purchasable line item extracted from the ITB. */
 export interface LineItem {
   item_no?: string | null;
   item_name?: string | null;
@@ -13,6 +15,7 @@ export interface LineItem {
   specs?: SpecPair[];
 }
 
+/** Trimmed result payload the API returns once a job is done. */
 export interface JobResult {
   files_processed: number;
   source_files: string[];
@@ -30,13 +33,16 @@ export interface JobResult {
   has_output: boolean;
 }
 
+/** Lifecycle state of a processing job. */
 export type JobStatus = "queued" | "running" | "done" | "error";
 
+/** A timestamped progress message shown in the job log panel. */
 export interface JobLog {
   ts: string;
   message: string;
 }
 
+/** Full job state as returned by the backend API. */
 export interface Job {
   id: string;
   status: JobStatus;

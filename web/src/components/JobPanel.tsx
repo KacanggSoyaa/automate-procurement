@@ -1,5 +1,6 @@
 import type { Job } from "../types";
 
+// Badge colours for each job status.
 const STATUS_STYLES: Record<string, string> = {
   queued: "text-paper-200/70 border-ink-600",
   running: "text-amber border-amber/50",
@@ -7,6 +8,7 @@ const STATUS_STYLES: Record<string, string> = {
   error: "text-danger border-danger/50",
 };
 
+/** Shows a job's status badge, progress bar, error and live log. */
 export default function JobPanel({ job }: { job: Job }) {
   const pct =
     job.total > 0 ? Math.min(100, Math.round((job.current / job.total) * 100)) : job.status === "done" ? 100 : 8;

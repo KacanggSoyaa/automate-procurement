@@ -1,3 +1,9 @@
+"""Reference example of the exact RFQ layout the generator should match.
+
+This is a standalone script (it runs and writes a sample DOCX when executed)
+and is kept only as a formatting reference for ``enhanced_spec_sheet.py``.
+It is not imported by the application.
+"""
 import docx
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -22,10 +28,12 @@ HEADER_BG = "008080"                       # Teal Header fill
 ALT_ROW_BG = "F4F8F8"                      # Light tint
 
 def set_cell_background(cell, hex_color):
+    """Fill a table cell with a solid background colour."""
     shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{hex_color}"/>')
     cell._tc.get_or_add_tcPr().append(shading_elm)
 
 def set_cell_margins(cell, top=100, bottom=100, left=150, right=150):
+    """Apply internal padding (in dxa twips) to a table cell."""
     tcPr = cell._tc.get_or_add_tcPr()
     tcMar = OxmlElement('w:tcMar')
     for m, val in [('top', top), ('bottom', bottom), ('left', left), ('right', right)]:
@@ -36,6 +44,7 @@ def set_cell_margins(cell, top=100, bottom=100, left=150, right=150):
     tcPr.append(tcMar)
 
 def add_heading_styled(doc, text, level):
+    """Add a level 1/2 heading with the corporate font and colour."""
     h = doc.add_heading(level=level)
     run = h.add_run(text)
     run.font.name = 'Calibri'

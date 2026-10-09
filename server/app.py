@@ -1,3 +1,4 @@
+"""FastAPI backend for the Automate Procurement web UI."""
 from pathlib import Path
 from typing import List, Optional
 
@@ -16,6 +17,7 @@ from .jobs import job_manager
 
 app = FastAPI(title="Automate Procurement API", version="0.1.0")
 
+# The Vite dev server runs on a different port, so allow cross-origin calls.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,6 +29,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health():
+    """Liveness probe used to check the backend is up."""
     return {"status": "ok"}
 
 
@@ -37,6 +40,7 @@ async def create_job(
     include_images: bool = Form(True),
     pattern: str = Form("*"),
 ):
+    """Accept an uploaded ITB folder and queue a processing job."""
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
     job = job_manager.create(files, model=model, include_images=include_images, pattern=pattern)
@@ -45,6 +49,7 @@ async def create_job(
 
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str):
+    """Return the current status, logs and results of a job."""
     job = job_manager.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
@@ -53,6 +58,7 @@ def get_job(job_id: str):
 
 @app.get("/api/jobs/{job_id}/download")
 def download(job_id: str):
+    """Stream the generated specification sheet DOCX for a finished job."""
     job = job_manager.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")

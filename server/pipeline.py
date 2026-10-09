@@ -1,6 +1,7 @@
+"""End-to-end ITB -> specification sheet pipeline shared by the API and CLI."""
 import sys
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -11,6 +12,42 @@ from processors.ai_processor import AIProcessor  # noqa: E402
 from generators.enhanced_spec_sheet import EnhancedSpecSheetGenerator  # noqa: E402
 
 ProgressCb = Optional[Callable[[str, int, int, str], None]]
+
+# Filename hints for documents that only contain rules, terms or how-to text.
+# These are never allowed to contribute line items or project metadata.
+BOILERPLATE_HINTS = (
+    "hse", "safety", "rules", "regulation", "terms", "conditions", "gtc",
+    "guide", "manual", "policy", "procedure", "instruction",
+)
+
+# Filename hints for the actual bid/spec document that holds the real items.
+PRIMARY_HINTS = (
+    "itb", "rfq", "tender", "bid", "quotation", "quote", "spec", "price",
+    "boq", "schedule of rates", "requisition",
+)
+
+
+def is_boilerplate(filename: str) -> bool:
+    """Return True when a document is terms/conditions, safety or a user guide.
+
+    A filename that also carries a primary hint (e.g. "ITB Terms") is treated
+    as a real bid document so the actual ITB is never skipped by mistake.
+    """
+    name = filename.lower()
+    if any(hint in name for hint in PRIMARY_HINTS):
+        return False
+    return any(hint in name for hint in BOILERPLATE_HINTS)
+
+
+def select_bid_documents(results: List[Dict]) -> List[Dict]:
+    """Choose which documents should be sent for line-item extraction.
+
+    Boilerplate documents (HSE, GTC, user guides) are skipped. If every
+    document looks like boilerplate we fall back to the full set so the model
+    is never handed nothing to read.
+    """
+    primary = [r for r in results if not is_boilerplate(r["filename"])]
+    return primary or results
 
 
 def run_pipeline(
@@ -24,6 +61,7 @@ def run_pipeline(
     """Run the full ITB -> spec sheet pipeline for a folder of uploaded files."""
 
     def emit(stage: str, current: int, total: int, message: str):
+        """Forward a progress update to the caller's callback, if any."""
         if progress:
             progress(stage, current, total, message)
 
@@ -38,8 +76,17 @@ def run_pipeline(
         emit("extract", 0, 1, f"Skipped {r['filename']}: {r['error']}")
     ok = [r for r in results if not r.get("error")]
     emit("extract", 1, 1, f"Read {len(ok)} PDF file(s)")
-    content = "\n\n".join(r.get("content", "") for r in ok)
 
+    # Only the actual bid/spec documents are sent to Gemini for line items.
+    # Terms, HSE rules and user guides are listed as evidence but never
+    # classified, which keeps the item list clean and the run fast.
+    docs = select_bid_documents(ok)
+    for r in ok:
+        if r not in docs:
+            emit("extract", 1, 1, f"Skipped non-item document: {r['filename']}")
+    content = "\n\n".join(r.get("content", "") for r in docs)
+
+    # Every uploaded document is kept as evidence for the source footer.
     source_files = [r["filename"] for r in ok]
 
     image_paths = []
@@ -49,7 +96,7 @@ def run_pipeline(
         image_paths += screenshots
         source_files += [Path(p).name for p in screenshots]
         render_dir = str(Path(output_path).parent / "extracted_images")
-        for r in ok:
+        for r in docs:
             image_paths += pdf_ext.render_image_pages(r["path"], render_dir)
         emit("images", 1, 1, f"Found {len(image_paths)} image(s)")
 

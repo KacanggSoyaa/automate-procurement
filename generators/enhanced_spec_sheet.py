@@ -1,3 +1,4 @@
+"""Builds the teal RFQ specification sheet DOCX from classified ITB data."""
 import docx
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -6,6 +7,7 @@ from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsdecls, qn
 
 
+# Corporate colour palette used throughout the generated document.
 PRIMARY_COLOR = RGBColor(0, 128, 128)
 SECONDARY_COLOR = RGBColor(51, 51, 51)
 MUTED_TEXT = RGBColor(100, 100, 100)
@@ -14,11 +16,15 @@ ALT_ROW_BG = "F4F8F8"
 
 
 class EnhancedSpecSheetGenerator:
+    """Renders classified ITB data into the formatted RFQ specification DOCX."""
+
     def _set_cell_background(self, cell, hex_color):
+        """Fill a table cell with a solid background colour."""
         shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{hex_color}"/>')
         cell._tc.get_or_add_tcPr().append(shading_elm)
 
     def _set_cell_margins(self, cell, top=100, bottom=100, left=150, right=150):
+        """Apply internal padding (in dxa twips) to a table cell."""
         tcPr = cell._tc.get_or_add_tcPr()
         tcMar = OxmlElement('w:tcMar')
         for m, val in [('top', top), ('bottom', bottom), ('left', left), ('right', right)]:
@@ -29,6 +35,7 @@ class EnhancedSpecSheetGenerator:
         tcPr.append(tcMar)
 
     def _add_heading_styled(self, doc, text, level):
+        """Add a level 1/2 heading with the corporate font and colour."""
         h = doc.add_heading(level=level)
         run = h.add_run(text)
         run.font.name = 'Calibri'
@@ -47,6 +54,7 @@ class EnhancedSpecSheetGenerator:
         return h
 
     def _meta_block(self, doc, meta):
+        """Add the project/reference and delivery metadata table."""
         project_ref = meta.get('project_ref') or 'To be specified'
         project_title = meta.get('project_title') or ''
         project_line = f"Project / Ref: {project_ref}"
@@ -79,6 +87,7 @@ class EnhancedSpecSheetGenerator:
                 p.paragraph_format.space_after = Pt(1)
 
     def _items_table(self, doc, items):
+        """Add the summary table of extracted line items."""
         table = doc.add_table(rows=1 + max(len(items), 1), cols=6)
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         table.autofit = False
@@ -132,6 +141,7 @@ class EnhancedSpecSheetGenerator:
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     def _details(self, doc, items):
+        """Add a per-item detailed technical specification section."""
         for i, item in enumerate(items, 1):
             title = item.get('item_name') or (item.get('description') or f'Item {i}')
             if len(title) > 80:
@@ -170,6 +180,7 @@ class EnhancedSpecSheetGenerator:
             doc.add_paragraph().paragraph_format.space_after = Pt(10)
 
     def _instructions(self, doc, submission_rules):
+        """Add the quotation submission instructions, falling back to defaults."""
         instructions = submission_rules[:12] if submission_rules else [
             "Please provide unit price and total pricing delivered to the specified delivery location.",
             "Include official manufacturer datasheets or technical compliance verification for the proposed model.",
@@ -185,6 +196,7 @@ class EnhancedSpecSheetGenerator:
             r.font.size = Pt(10)
 
     def _source_note(self, doc, source_files):
+        """Add the small evidence footer listing the source documents."""
         if not source_files:
             return
         doc.add_paragraph()
@@ -204,6 +216,7 @@ class EnhancedSpecSheetGenerator:
             p.paragraph_format.space_after = Pt(0)
 
     def generate(self, extracted_data: dict, output_path: str):
+        """Generate the full specification sheet and return the output path."""
         doc = docx.Document()
 
         for section in doc.sections:

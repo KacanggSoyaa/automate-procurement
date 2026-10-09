@@ -1,3 +1,4 @@
+"""In-memory job queue that runs the extraction pipeline in a thread pool."""
 import threading
 import traceback
 import uuid
@@ -9,12 +10,14 @@ from typing import Dict, List, Optional
 
 from .pipeline import run_pipeline
 
+# Where uploaded files and per-job output workspaces are stored.
 UPLOAD_ROOT = Path("./data/uploads")
 WORKSPACE_ROOT = Path("./data/workspaces")
 
 
 @dataclass
 class Job:
+    """State for a single extraction job, as seen by the API and the UI."""
     id: str
     status: str = "queued"
     stage: str = "queued"
@@ -29,6 +32,7 @@ class Job:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_dict(self) -> Dict:
+        """Serialise the job for the JSON API (keeps only the last 50 logs)."""
         return {
             "id": self.id,
             "status": self.status,
@@ -44,6 +48,7 @@ class Job:
         }
 
     def _result_summary(self):
+        """Return the trimmed result payload, or None while the job runs."""
         if self.status != "done" or not self.data:
             return None
         d = self.data
@@ -61,18 +66,23 @@ class Job:
 
 
 class JobManager:
+    """Creates jobs, saves uploads and executes the pipeline in the background."""
+
     def __init__(self, max_workers: int = 2):
+        """Set up the in-memory job store and the worker thread pool."""
         self._jobs: Dict[str, Job] = {}
         self._lock = threading.Lock()
         self._pool = ThreadPoolExecutor(max_workers=max_workers)
 
     def create(self, files: List, model: Optional[str] = None, include_images: bool = True,
                pattern: str = "*") -> Job:
+        """Save the uploaded files, register a job and start it in the pool."""
         job_id = uuid.uuid4().hex[:12]
         job = Job(id=job_id)
         upload_dir = UPLOAD_ROOT / job_id
         upload_dir.mkdir(parents=True, exist_ok=True)
 
+        # Stream each upload to disk in 1MB blocks to handle large files.
         for f in files:
             name = Path(f.filename).name
             if not name:
@@ -99,6 +109,7 @@ class JobManager:
         return job
 
     def _run(self, job: Job, upload_dir: str, output_path: str, model, include_images, pattern):
+        """Execute the pipeline for one job, updating state and logging errors."""
         self._update(job, status="running", stage="start", message="Starting pipeline")
         try:
             result = run_pipeline(
@@ -132,6 +143,7 @@ class JobManager:
             traceback.print_exc()
 
     def _update(self, job: Job, log: Optional[str] = None, **fields):
+        """Thread-safely set job fields and optionally append a timestamped log."""
         with self._lock:
             for key, val in fields.items():
                 if val is not None:
@@ -140,6 +152,7 @@ class JobManager:
                 job.logs.append({"ts": datetime.now().strftime("%H:%M:%S"), "message": log})
 
     def get(self, job_id: str) -> Optional[Job]:
+        """Look up a job by id, or return None if it does not exist."""
         with self._lock:
             return self._jobs.get(job_id)
 

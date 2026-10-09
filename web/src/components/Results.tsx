@@ -1,6 +1,7 @@
 import { downloadUrl } from "../api";
 import type { Job } from "../types";
 
+/** Small stat card used in the results summary grid. */
 function Stat({ label, value, accent }: { label: string; value: number | string; accent?: boolean }) {
   return (
     <div className="rounded-xl border border-ink-700 bg-ink-900/70 p-4">
@@ -12,6 +13,7 @@ function Stat({ label, value, accent }: { label: string; value: number | string;
   );
 }
 
+/** Renders the finished job: stats, metadata, item table, download + evidence. */
 export default function Results({ job }: { job: Job }) {
   const result = job.result;
   if (!result) return null;

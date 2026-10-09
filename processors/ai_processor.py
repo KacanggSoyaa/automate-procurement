@@ -1,3 +1,8 @@
+"""Gemini-based classification of ITB text and images.
+
+Separates genuine purchasable line items from general requirements and caches
+results on disk so repeat runs do not spend extra API quota.
+"""
 import os
 import json
 import time
@@ -17,11 +22,13 @@ except ImportError:
 
 
 class SpecPair(BaseModel):
+    """A single technical specification (parameter -> value) for an item."""
     parameter: str
     value: str
 
 
 class LineItem(BaseModel):
+    """A purchasable line item extracted from an ITB/RFQ document."""
     item_no: Optional[str] = None
     item_name: Optional[str] = None
     item_number: Optional[str] = None
@@ -32,6 +39,7 @@ class LineItem(BaseModel):
 
 
 class Classification(BaseModel):
+    """Structured result the model returns for one chunk or image batch."""
     project_ref: Optional[str] = None
     project_title: Optional[str] = None
     delivery_location: Optional[str] = None
@@ -54,7 +62,10 @@ SYSTEM_INSTRUCTION = (
     "  - item_number: the buyer's item/material/part number if shown\n"
     "  - description: the full item description\n"
     "  - qty: quantity as text; uom: unit of measure as text\n"
-    "  - specs: a list of {parameter, value} pairs for the item's technical specification key details, when available\n\n"
+    "  - specs: a list of {parameter, value} pairs for the item's technical specification key details, when available\n"
+    "Only list an entry as a line item when it has a real item/material number, a quantity with unit, or concrete "
+    "technical specifications. Never treat section headings, document titles, Incoterm labels (EX-WORK/EXW, DDP, FOB, "
+    "CIF, etc.) or procurement-category labels as line items.\n\n"
     "REQUIREMENTS are clauses, instructions, rules, conditions, evaluation criteria, terms and conditions, submission "
     "instructions, deadlines, HSE rules, legal text, boilerplate, etc. These are NOT line items and must NEVER be placed "
     "in line_items.\n\n"
@@ -75,14 +86,17 @@ IMAGE_INSTRUCTION = (
 
 
 class AIProcessor:
+    """Classifies ITB text and images with Gemini, with model fallback + cache."""
+
     DEFAULT_MODEL = "gemini-3.8-flash"
     FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"]
     MAX_CHARS_PER_CHUNK = 120000
     MAX_IMAGES = 12
-    CACHE_VERSION = "v3"
+    CACHE_VERSION = "v4"
     CACHE_DIR = Path("./data/.ai_cache")
 
     def __init__(self, model: str = None, api_key: str = None, use_cache: bool = True):
+        """Create the Gemini client and resolve the model/cache settings."""
         if genai is None:
             raise RuntimeError(
                 "google-genai is not installed. Run: pip install google-genai"
@@ -101,6 +115,7 @@ class AIProcessor:
             self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     def _chunk(self, text: str) -> List[str]:
+        """Split long text into chunks that stay under the per-request limit."""
         lines = text.split("\n")
         chunks, current = [], []
         size = 0
@@ -115,12 +130,18 @@ class AIProcessor:
         return chunks
 
     def _cache_path(self, seed: str, model: str) -> Path:
+        """Return the on-disk cache path for a seed text and model."""
         key = hashlib.sha256(
             (self.CACHE_VERSION + "\x00" + model + "\x00" + seed).encode("utf-8")
         ).hexdigest()
         return self.CACHE_DIR / f"{key}.json"
 
     def _generate(self, contents, cache_seed: str, retries: int = 6) -> Classification:
+        """Call Gemini, trying each fallback model, retrying transient errors.
+
+        Daily-quota errors skip straight to the next model instead of backing
+        off, since a per-day limit will not clear during this run.
+        """
         config = types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
             response_mime_type="application/json",
@@ -159,6 +180,7 @@ class AIProcessor:
         raise RuntimeError(f"Gemini classification failed on all models: {last_err}")
 
     def _image_part(self, path: str):
+        """Read an image file into a Gemini content part with the right MIME type."""
         data = Path(path).read_bytes()
         lower = path.lower()
         if lower.endswith('.png'):
@@ -178,6 +200,7 @@ class AIProcessor:
         return types.Part.from_bytes(data=data, mime_type=mime)
 
     def _classify_images(self, image_paths: List[str], progress=None) -> Classification:
+        """Classify up to MAX_IMAGES screenshots/pages as a single request."""
         image_paths = image_paths[: self.MAX_IMAGES]
         if not image_paths:
             return Classification()
@@ -196,6 +219,7 @@ class AIProcessor:
 
     @staticmethod
     def _dedupe(values: List[str]) -> List[str]:
+        """Remove blank/near-duplicate strings while keeping the first wording."""
         seen, out = set(), []
         for v in values:
             key = " ".join(v.lower().split())
@@ -205,6 +229,11 @@ class AIProcessor:
         return out
 
     def classify(self, text: str, image_paths: List[str] = None, progress=None) -> Dict:
+        """Classify all text chunks and images, then return cleaned results.
+
+        Returns a dict with ``line_items``, the requirement categories and the
+        merged document ``meta`` fields.
+        """
         chunks = self._chunk(text) if text.strip() else []
         merged = Classification()
         meta = {}
@@ -222,8 +251,18 @@ class AIProcessor:
         seen_items, line_items = set(), []
         for item in merged.line_items:
             desc = (item.description or item.item_name or "").strip()
+            # Guard against headings / Incoterm labels that the model may
+            # return as items: a real line item must carry an item number, a
+            # quantity or at least one technical spec.
+            has_number = bool((item.item_number or "").strip())
+            has_qty = bool((item.qty or "").strip())
+            has_specs = any(
+                (s.parameter or "").strip() or (s.value or "").strip() for s in item.specs
+            )
+            if not (desc and (has_number or has_qty or has_specs)):
+                continue
             key = (" ".join(desc.lower().split()), item.item_number, item.qty)
-            if desc and key not in seen_items:
+            if key not in seen_items:
                 seen_items.add(key)
                 line_items.append(item.model_dump())
 
@@ -239,6 +278,11 @@ class AIProcessor:
 
     @staticmethod
     def _merge(merged: Classification, meta: Dict, result: Classification):
+        """Merge one classification result into the running total.
+
+        Meta fields are only filled the first time they are seen so the first
+        document wins and later documents cannot overwrite it.
+        """
         for field in ("project_ref", "project_title", "delivery_location", "buyer"):
             val = getattr(result, field)
             if val and not meta.get(field):

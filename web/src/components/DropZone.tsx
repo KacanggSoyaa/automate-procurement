@@ -1,16 +1,20 @@
 import { useCallback, useRef, useState } from "react";
 
+// File types accepted by the drop zone.
 const ALLOWED = [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".bmp"];
 
+/** Return true when a filename has an accepted extension. */
 function isAllowed(name: string): boolean {
   const lower = name.toLowerCase();
   return ALLOWED.some((ext) => lower.endsWith(ext));
 }
 
+/** Resolve a dropped folder entry to a File. */
 function readFile(entry: FileSystemFileEntry): Promise<File> {
   return new Promise((resolve, reject) => entry.file(resolve, reject));
 }
 
+/** Read all entries of a directory, paging until the reader is exhausted. */
 function readAllEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
   return new Promise((resolve, reject) => {
     const out: FileSystemEntry[] = [];
@@ -26,6 +30,7 @@ function readAllEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEn
   });
 }
 
+/** Recursively collect allowed files from a dropped file or directory entry. */
 async function traverse(entry: FileSystemEntry, files: File[]): Promise<void> {
   if (entry.isFile) {
     const file = await readFile(entry as FileSystemFileEntry);
@@ -36,16 +41,19 @@ async function traverse(entry: FileSystemEntry, files: File[]): Promise<void> {
   }
 }
 
+/** Props for the DropZone component. */
 interface Props {
   onFiles: (files: File[]) => void;
   disabled?: boolean;
 }
 
+/** Drag-and-drop / browse area for selecting an ITB folder or files. */
 export default function DropZone({ onFiles, disabled }: Props) {
   const [dragging, setDragging] = useState(false);
   const dirInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
+  /** Handle a drop: walk folder entries (or plain files) and report them up. */
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault();
@@ -71,6 +79,7 @@ export default function DropZone({ onFiles, disabled }: Props) {
     [onFiles, disabled]
   );
 
+  /** Handle the hidden file/folder inputs and filter to allowed types. */
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const list = e.target.files;
     if (!list) return;
