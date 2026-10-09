@@ -20,10 +20,13 @@ export function parseSkipList(value: string): string[] {
     .filter(Boolean);
 }
 
+/** Matches filenames the backend reads as documents (PDF / Word / Excel). */
+const DOC_EXT = /\.(pdf|docx|xlsx|xlsm)$/i;
+
 /**
  * Settings section where the user lists exact filenames to skip.
  *
- * Every PDF is read by default; anything listed here (matched
+ * Every document is read by default; anything listed here (matched
  * case-insensitively on the full filename) is left out of item extraction.
  */
 export default function SettingsPanel({ names, value, onChange, disabled }: Props) {
@@ -32,8 +35,8 @@ export default function SettingsPanel({ names, value, onChange, disabled }: Prop
     () => new Set(parsed.map((s) => s.toLowerCase())),
     [value],
   );
-  const pdfNames = useMemo(
-    () => names.filter((n) => n.toLowerCase().endsWith(".pdf")),
+  const docNames = useMemo(
+    () => names.filter((n) => DOC_EXT.test(n)),
     [names],
   );
 
@@ -58,14 +61,14 @@ export default function SettingsPanel({ names, value, onChange, disabled }: Prop
       </div>
 
       <p className="mt-2 font-sans text-xs leading-relaxed text-paper-200/50">
-        Every PDF is read by default. Click a document below or type its{" "}
+        Every document (PDF, Word, Excel) is read by default. Click a document below or type its{" "}
         <span className="text-paper-200/80">exact filename</span> (one per line) to exclude it
         from item extraction. Matching is case-insensitive.
       </p>
 
-      {pdfNames.length > 0 && (
+      {docNames.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {pdfNames.map((name) => {
+          {docNames.map((name) => {
             const active = skipped.has(name.toLowerCase());
             return (
               <button

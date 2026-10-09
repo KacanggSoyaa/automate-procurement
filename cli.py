@@ -14,6 +14,7 @@ except ImportError:
     pass
 
 from extractors.pdf_extractor import PDFExtractor
+from extractors.office_extractor import OfficeExtractor
 from processors.ai_processor import AIProcessor
 from generators.enhanced_spec_sheet import EnhancedSpecSheetGenerator
 from generators.rfq_dispatcher import RFQDispatcher
@@ -42,9 +43,13 @@ def extract(itb_dir, output, pattern, images, no_images, model, skip):
     """Steps 1 & 2: extract ITB content and generate the spec sheet."""
     click.echo('Step 1: ITB Review & Line Item Extraction...')
     pdf_ext = PDFExtractor()
+    office_ext = OfficeExtractor()
     results = pdf_ext.extract_itb_folder(itb_dir, pattern=pattern)
+    results += office_ext.extract_office_folder(itb_dir, pattern=pattern)
     if not results:
-        raise click.ClickException(f'No PDFs matching "{pattern}" found in {itb_dir}')
+        raise click.ClickException(
+            f'No readable PDF, Word or Excel files matching "{pattern}" found in {itb_dir}'
+        )
 
     # Every PDF is read by default; only exact filenames listed here are skipped.
     skip_set = {s.strip().lower() for s in skip.split(',') if s.strip()}
@@ -66,7 +71,8 @@ def extract(itb_dir, output, pattern, images, no_images, model, skip):
         image_paths += images_found
         source_files += [Path(p).name for p in images_found]
         for r in docs:
-            image_paths += pdf_ext.render_image_pages(r['path'], './outputs/extracted_images')
+            if r['path'].lower().endswith('.pdf'):
+                image_paths += pdf_ext.render_image_pages(r['path'], './outputs/extracted_images')
         if image_paths:
             click.echo(f'  - {len(image_paths)} image(s) will be sent to Gemini')
 
@@ -135,9 +141,10 @@ def dispatch(spec_sheet, vendor_file):
 @click.option('--itb-dir', default='./data/itb')
 @click.option('--pattern', default='*ITB*', help='Filename glob of source PDFs (default: *ITB*)')
 def analyze(itb_dir, pattern):
-    """Quickly report which PDFs match and how much text was read from each."""
+    """Quickly report which documents match and how much text was read from each."""
     pdf_ext = PDFExtractor()
     results = pdf_ext.extract_itb_folder(itb_dir, pattern=pattern)
+    results += OfficeExtractor().extract_office_folder(itb_dir, pattern=pattern)
     for r in results:
         if r.get('error'):
             click.echo(click.style(f'{r["filename"]}: {r["error"]}', fg='red'))

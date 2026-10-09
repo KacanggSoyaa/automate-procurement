@@ -98,7 +98,7 @@ export default function App() {
           </h1>
           <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
             Upload your Invitation To Bid documents and screenshots. Everything runs in the background —
-            PDFs and images are read, line items are separated from requirements by Gemini, and a
+            PDFs, Word / Excel files and images are read, line items are separated from requirements by Gemini, and a
             formatted RFQ specification sheet comes out the other side.
           </p>
         </section>

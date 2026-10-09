@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 
 // File types accepted by the drop zone.
-const ALLOWED = [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".bmp"];
+const ALLOWED = [".pdf", ".docx", ".xlsx", ".xlsm", ".png", ".jpg", ".jpeg", ".webp", ".bmp"];
 
 /** Return true when a filename has an accepted extension. */
 function isAllowed(name: string): boolean {

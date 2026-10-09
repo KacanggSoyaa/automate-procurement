@@ -8,6 +8,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from extractors.pdf_extractor import PDFExtractor  # noqa: E402
+from extractors.office_extractor import OfficeExtractor  # noqa: E402
 from processors.ai_processor import AIProcessor  # noqa: E402
 from generators.enhanced_spec_sheet import EnhancedSpecSheetGenerator  # noqa: E402
 
@@ -32,10 +33,10 @@ def run_pipeline(
 ) -> Dict:
     """Run the full ITB -> spec sheet pipeline for a folder of uploaded files.
 
-    Every matching PDF is read by default. ``skip_files`` lets the caller
-    exclude specific documents by exact filename (case-insensitive); skipped
-    files are still listed in the source footer as evidence but are never sent
-    to Gemini for classification.
+    Every matching PDF, Word (.docx) and Excel (.xlsx/.xlsm) file is read by
+    default. ``skip_files`` lets the caller exclude specific documents by exact
+    filename (case-insensitive); skipped files are still listed in the source
+    footer as evidence but are never sent to Gemini for classification.
     """
 
     def emit(stage: str, current: int, total: int, message: str):
@@ -44,16 +45,20 @@ def run_pipeline(
             progress(stage, current, total, message)
 
     pdf_ext = PDFExtractor()
+    office_ext = OfficeExtractor()
 
-    emit("extract", 0, 1, "Scanning uploaded PDF files...")
+    emit("extract", 0, 1, "Scanning uploaded PDF / Word / Excel files...")
     results = pdf_ext.extract_itb_folder(input_dir, pattern=pattern)
+    results += office_ext.extract_office_folder(input_dir, pattern=pattern)
     if not results:
-        raise RuntimeError(f"No PDF files matched '{pattern}' in the upload.")
+        raise RuntimeError(
+            f"No readable PDF, Word or Excel files matched '{pattern}' in the upload."
+        )
     errors = [r for r in results if r.get("error")]
     for r in errors:
         emit("extract", 0, 1, f"Skipped {r['filename']}: {r['error']}")
     ok = [r for r in results if not r.get("error")]
-    emit("extract", 1, 1, f"Read {len(ok)} PDF file(s)")
+    emit("extract", 1, 1, f"Read {len(ok)} file(s)")
 
     # Every PDF is read by default. Only filenames the user explicitly listed
     # in the settings are excluded (exact match, case-insensitive), so the real
@@ -76,7 +81,8 @@ def run_pipeline(
         source_files += [Path(p).name for p in screenshots]
         render_dir = str(Path(output_path).parent / "extracted_images")
         for r in docs:
-            image_paths += pdf_ext.render_image_pages(r["path"], render_dir)
+            if r["path"].lower().endswith(".pdf"):
+                image_paths += pdf_ext.render_image_pages(r["path"], render_dir)
         emit("images", 1, 1, f"Found {len(image_paths)} image(s)")
 
     processor = AIProcessor(model=model)
