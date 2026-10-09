@@ -33,17 +33,36 @@ def health():
     return {"status": "ok"}
 
 
+def _parse_skip_files(raw: Optional[str]) -> List[str]:
+    """Split the settings textarea into a clean list of filenames to skip."""
+    if not raw:
+        return []
+    parts = raw.replace(",", "\n").splitlines()
+    return [p.strip() for p in parts if p.strip()]
+
+
 @app.post("/api/jobs")
 async def create_job(
     files: List[UploadFile] = File(...),
     model: Optional[str] = Form(None),
     include_images: bool = Form(True),
     pattern: str = Form("*"),
+    skip_files: Optional[str] = Form(None),
 ):
-    """Accept an uploaded ITB folder and queue a processing job."""
+    """Accept an uploaded ITB folder and queue a processing job.
+
+    ``skip_files`` is a newline- or comma-separated list of exact filenames the
+    user chose to exclude from item extraction.
+    """
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
-    job = job_manager.create(files, model=model, include_images=include_images, pattern=pattern)
+    job = job_manager.create(
+        files,
+        model=model,
+        include_images=include_images,
+        pattern=pattern,
+        skip_files=_parse_skip_files(skip_files),
+    )
     return job.to_dict()
 
 

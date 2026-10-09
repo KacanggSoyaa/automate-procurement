@@ -37,16 +37,25 @@ def cli():
 @click.option('--images', default=None, help='Comma-separated image globs to include (default: png/jpg/jpeg/webp/bmp)')
 @click.option('--no-images', is_flag=True, help='Do not send images to Gemini')
 @click.option('--model', default=None, help='Gemini model (default: gemini-3.8-flash)')
-def extract(itb_dir, output, pattern, images, no_images, model):
+@click.option('--skip', default='', help='Comma-separated exact filenames to exclude from extraction')
+def extract(itb_dir, output, pattern, images, no_images, model, skip):
     """Steps 1 & 2: extract ITB content and generate the spec sheet."""
     click.echo('Step 1: ITB Review & Line Item Extraction...')
     pdf_ext = PDFExtractor()
     results = pdf_ext.extract_itb_folder(itb_dir, pattern=pattern)
     if not results:
         raise click.ClickException(f'No PDFs matching "{pattern}" found in {itb_dir}')
-    source_files = [r['filename'] for r in results if not r.get('error')]
+
+    # Every PDF is read by default; only exact filenames listed here are skipped.
+    skip_set = {s.strip().lower() for s in skip.split(',') if s.strip()}
+    ok = [r for r in results if not r.get('error')]
+    docs = [r for r in ok if r['filename'].strip().lower() not in skip_set]
+    for r in ok:
+        if r['filename'].strip().lower() in skip_set:
+            click.echo(f'  - skipping (settings): {r["filename"]}')
+    source_files = [r['filename'] for r in ok]
     click.echo(f'  - {len(results)} file(s) matched "{pattern}"')
-    all_content = '\n\n'.join([r.get('content', '') for r in results if not r.get('error')])
+    all_content = '\n\n'.join([r.get('content', '') for r in docs])
 
     # Collect standalone screenshots and render image-heavy PDF pages so the
     # model can read tables/specs that exist only as pictures.
@@ -56,9 +65,8 @@ def extract(itb_dir, output, pattern, images, no_images, model):
         images_found = pdf_ext.collect_image_files(itb_dir, patterns=globs)
         image_paths += images_found
         source_files += [Path(p).name for p in images_found]
-        for r in results:
-            if not r.get('error'):
-                image_paths += pdf_ext.render_image_pages(r['path'], './outputs/extracted_images')
+        for r in docs:
+            image_paths += pdf_ext.render_image_pages(r['path'], './outputs/extracted_images')
         if image_paths:
             click.echo(f'  - {len(image_paths)} image(s) will be sent to Gemini')
 
@@ -141,7 +149,7 @@ def analyze(itb_dir, pattern):
 def run_all():
     """Run extraction and vendor setup back-to-back as one workflow."""
     extract.callback(itb_dir='./data/itb', output='./outputs/specification_sheet.docx',
-                     pattern='*ITB*', images=None, no_images=False, model=None)
+                     pattern='*ITB*', images=None, no_images=False, model=None, skip='')
     setup_vendors.callback()
     click.echo(click.style('\nWorkflow complete!', fg='green'))
 

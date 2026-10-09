@@ -3,6 +3,7 @@ import { createJob, getJob } from "./api";
 import DropZone from "./components/DropZone";
 import JobPanel from "./components/JobPanel";
 import Results from "./components/Results";
+import SettingsPanel, { parseSkipList } from "./components/SettingsPanel";
 import type { Job } from "./types";
 
 /** Format a byte count as a short human-readable string (B / KB / MB). */
@@ -22,6 +23,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [includeImages, setIncludeImages] = useState(true);
+  const [skipFiles, setSkipFiles] = useState("");
 
   // Total size of the selected files, shown in the file summary bar.
   const totalSize = useMemo(() => files.reduce((sum, f) => sum + f.size, 0), [files]);
@@ -62,7 +64,7 @@ export default function App() {
     setError(null);
     setJob(null);
     try {
-      const j = await createJob(files, { includeImages });
+      const j = await createJob(files, { includeImages, skipFiles: parseSkipList(skipFiles) });
       setJob(j);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -133,6 +135,13 @@ export default function App() {
                 </li>
               ))}
             </ul>
+
+            <SettingsPanel
+              names={files.map((f) => f.name)}
+              value={skipFiles}
+              onChange={setSkipFiles}
+              disabled={running}
+            />
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
               <label className="flex items-center gap-2 font-mono text-xs text-paper-200/70">

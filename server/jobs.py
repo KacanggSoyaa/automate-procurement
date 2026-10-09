@@ -75,7 +75,7 @@ class JobManager:
         self._pool = ThreadPoolExecutor(max_workers=max_workers)
 
     def create(self, files: List, model: Optional[str] = None, include_images: bool = True,
-               pattern: str = "*") -> Job:
+               pattern: str = "*", skip_files: Optional[List[str]] = None) -> Job:
         """Save the uploaded files, register a job and start it in the pool."""
         job_id = uuid.uuid4().hex[:12]
         job = Job(id=job_id)
@@ -104,11 +104,13 @@ class JobManager:
         output_path = workspace / "specification_sheet.docx"
 
         self._pool.submit(
-            self._run, job, str(upload_dir), str(output_path), model, include_images, pattern
+            self._run, job, str(upload_dir), str(output_path), model, include_images,
+            pattern, skip_files,
         )
         return job
 
-    def _run(self, job: Job, upload_dir: str, output_path: str, model, include_images, pattern):
+    def _run(self, job: Job, upload_dir: str, output_path: str, model, include_images, pattern,
+             skip_files: Optional[List[str]] = None):
         """Execute the pipeline for one job, updating state and logging errors."""
         self._update(job, status="running", stage="start", message="Starting pipeline")
         try:
@@ -118,6 +120,7 @@ class JobManager:
                 model=model,
                 include_images=include_images,
                 pattern=pattern,
+                skip_files=skip_files,
                 progress=lambda stage, cur, tot, msg: self._update(
                     job, stage=stage, current=cur, total=tot, message=msg, log=msg
                 ),

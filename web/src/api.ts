@@ -7,6 +7,7 @@ export interface CreateJobOptions {
   model?: string;
   includeImages?: boolean;
   pattern?: string;
+  skipFiles?: string[];
 }
 
 /** Upload the given files as a folder and start a new processing job. */
@@ -18,6 +19,9 @@ export async function createJob(files: File[], opts: CreateJobOptions = {}): Pro
   if (opts.model) form.append("model", opts.model);
   form.append("include_images", String(opts.includeImages ?? true));
   form.append("pattern", opts.pattern ?? "*");
+  if (opts.skipFiles && opts.skipFiles.length) {
+    form.append("skip_files", opts.skipFiles.join("\n"));
+  }
 
   const res = await fetch(`${BASE}/jobs`, { method: "POST", body: form });
   if (!res.ok) {

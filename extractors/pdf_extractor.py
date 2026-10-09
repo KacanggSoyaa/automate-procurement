@@ -1,9 +1,22 @@
 """PDF text and image extraction utilities for ITB packages."""
 import os
 import fnmatch
-import pdfplumber
 from pathlib import Path
 from typing import Dict, List
+
+# PyMuPDF is the primary engine (fast); pdfplumber is a pure-Python fallback.
+try:
+    import pymupdf as fitz
+except ImportError:
+    try:
+        import fitz
+    except ImportError:
+        fitz = None
+
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None
 
 # Extensions treated as standalone images (screenshots) inside an ITB folder.
 IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff')
@@ -12,12 +25,27 @@ IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.
 class PDFExtractor:
     """Reads text out of PDFs and finds images/screenshots in a folder."""
 
-    def __init__(self, engine: str = "pdfplumber"):
-        """Store the extraction engine name (currently only pdfplumber)."""
+    def __init__(self, engine: str = "pymupdf"):
+        """Store the preferred engine name (PyMuPDF, with pdfplumber fallback)."""
         self.engine = engine
 
     def extract_text_from_pdf(self, pdf_path: str) -> str:
-        """Return the concatenated text of every page in a single PDF."""
+        """Return the concatenated text of every page in a single PDF.
+
+        Uses PyMuPDF when available because it is far faster than pdfplumber;
+        falls back to pdfplumber only if PyMuPDF is missing.
+        """
+        if fitz is not None:
+            doc = fitz.open(pdf_path)
+            try:
+                return "\n".join(page.get_text() for page in doc)
+            finally:
+                doc.close()
+
+        if pdfplumber is None:
+            raise RuntimeError(
+                "No PDF engine available. Install pymupdf (preferred) or pdfplumber."
+            )
         text = []
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
@@ -55,13 +83,8 @@ class PDFExtractor:
 
     def render_image_pages(self, pdf_path: str, out_dir: str, dpi: int = 150, min_text: int = 50) -> List[str]:
         """Render PDF pages that contain images or almost no text (scanned/image-only pages)."""
-        try:
-            import pymupdf as fitz
-        except ImportError:
-            try:
-                import fitz
-            except ImportError:
-                return []
+        if fitz is None:
+            return []
         out_paths = []
         Path(out_dir).mkdir(parents=True, exist_ok=True)
         doc = fitz.open(pdf_path)

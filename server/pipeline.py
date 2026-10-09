@@ -13,41 +13,12 @@ from generators.enhanced_spec_sheet import EnhancedSpecSheetGenerator  # noqa: E
 
 ProgressCb = Optional[Callable[[str, int, int, str], None]]
 
-# Filename hints for documents that only contain rules, terms or how-to text.
-# These are never allowed to contribute line items or project metadata.
-BOILERPLATE_HINTS = (
-    "hse", "safety", "rules", "regulation", "terms", "conditions", "gtc",
-    "guide", "manual", "policy", "procedure", "instruction",
-)
 
-# Filename hints for the actual bid/spec document that holds the real items.
-PRIMARY_HINTS = (
-    "itb", "rfq", "tender", "bid", "quotation", "quote", "spec", "price",
-    "boq", "schedule of rates", "requisition",
-)
-
-
-def is_boilerplate(filename: str) -> bool:
-    """Return True when a document is terms/conditions, safety or a user guide.
-
-    A filename that also carries a primary hint (e.g. "ITB Terms") is treated
-    as a real bid document so the actual ITB is never skipped by mistake.
-    """
-    name = filename.lower()
-    if any(hint in name for hint in PRIMARY_HINTS):
-        return False
-    return any(hint in name for hint in BOILERPLATE_HINTS)
-
-
-def select_bid_documents(results: List[Dict]) -> List[Dict]:
-    """Choose which documents should be sent for line-item extraction.
-
-    Boilerplate documents (HSE, GTC, user guides) are skipped. If every
-    document looks like boilerplate we fall back to the full set so the model
-    is never handed nothing to read.
-    """
-    primary = [r for r in results if not is_boilerplate(r["filename"])]
-    return primary or results
+def _normalise_skip(skip_files: Optional[List[str]]) -> set:
+    """Normalise user-listed filenames for case-insensitive exact matching."""
+    if not skip_files:
+        return set()
+    return {str(name).strip().lower() for name in skip_files if str(name).strip()}
 
 
 def run_pipeline(
@@ -56,9 +27,16 @@ def run_pipeline(
     model: Optional[str] = None,
     include_images: bool = True,
     pattern: str = "*",
+    skip_files: Optional[List[str]] = None,
     progress: ProgressCb = None,
 ) -> Dict:
-    """Run the full ITB -> spec sheet pipeline for a folder of uploaded files."""
+    """Run the full ITB -> spec sheet pipeline for a folder of uploaded files.
+
+    Every matching PDF is read by default. ``skip_files`` lets the caller
+    exclude specific documents by exact filename (case-insensitive); skipped
+    files are still listed in the source footer as evidence but are never sent
+    to Gemini for classification.
+    """
 
     def emit(stage: str, current: int, total: int, message: str):
         """Forward a progress update to the caller's callback, if any."""
@@ -77,13 +55,14 @@ def run_pipeline(
     ok = [r for r in results if not r.get("error")]
     emit("extract", 1, 1, f"Read {len(ok)} PDF file(s)")
 
-    # Only the actual bid/spec documents are sent to Gemini for line items.
-    # Terms, HSE rules and user guides are listed as evidence but never
-    # classified, which keeps the item list clean and the run fast.
-    docs = select_bid_documents(ok)
+    # Every PDF is read by default. Only filenames the user explicitly listed
+    # in the settings are excluded (exact match, case-insensitive), so the real
+    # item document is never skipped by mistake.
+    skipped = _normalise_skip(skip_files)
+    docs = [r for r in ok if r["filename"].strip().lower() not in skipped]
     for r in ok:
-        if r not in docs:
-            emit("extract", 1, 1, f"Skipped non-item document: {r['filename']}")
+        if r["filename"].strip().lower() in skipped:
+            emit("extract", 1, 1, f"Skipped by settings: {r['filename']}")
     content = "\n\n".join(r.get("content", "") for r in docs)
 
     # Every uploaded document is kept as evidence for the source footer.
