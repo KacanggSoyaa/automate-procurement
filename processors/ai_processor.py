@@ -65,12 +65,21 @@ SYSTEM_INSTRUCTION = (
     "To avoid overwhelming output, return the most relevant requirements only (at most about 40 per category per section)."
 )
 
+IMAGE_INSTRUCTION = (
+    "The following image(s) are screenshots or pictures taken from the ITB / RFQ / price sheet. "
+    "Read the text, tables and specifications shown inside the images. Extract every REAL purchasable line item "
+    "with its item name, item number, description, quantity, unit of measure and technical specification details. "
+    "Also extract any clearly stated requirements into the matching categories. "
+    "Use exactly the same rules as for the document text: do NOT place general clauses, terms or instructions into line_items."
+)
+
 
 class AIProcessor:
     DEFAULT_MODEL = "gemini-3.8-flash"
     FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"]
     MAX_CHARS_PER_CHUNK = 120000
-    CACHE_VERSION = "v2"
+    MAX_IMAGES = 12
+    CACHE_VERSION = "v3"
     CACHE_DIR = Path("./data/.ai_cache")
 
     def __init__(self, model: str = None, api_key: str = None, use_cache: bool = True):
@@ -105,13 +114,13 @@ class AIProcessor:
             chunks.append("\n".join(current))
         return chunks
 
-    def _cache_path(self, text: str, model: str) -> Path:
+    def _cache_path(self, seed: str, model: str) -> Path:
         key = hashlib.sha256(
-            (self.CACHE_VERSION + "\x00" + model + "\x00" + text).encode("utf-8")
+            (self.CACHE_VERSION + "\x00" + model + "\x00" + seed).encode("utf-8")
         ).hexdigest()
         return self.CACHE_DIR / f"{key}.json"
 
-    def _classify_chunk(self, text: str, retries: int = 6) -> Classification:
+    def _generate(self, contents, cache_seed: str, retries: int = 6) -> Classification:
         config = types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
             response_mime_type="application/json",
@@ -120,7 +129,7 @@ class AIProcessor:
         )
         last_err = None
         for model in self.models:
-            cache_path = self._cache_path(text, model)
+            cache_path = self._cache_path(cache_seed, model)
             if self.use_cache and cache_path.exists():
                 try:
                     return Classification.model_validate_json(
@@ -132,7 +141,7 @@ class AIProcessor:
                 try:
                     resp = self.client.models.generate_content(
                         model=model,
-                        contents=text,
+                        contents=contents,
                         config=config,
                     )
                     if self.use_cache:
@@ -148,6 +157,42 @@ class AIProcessor:
                     time.sleep(delay)
         raise RuntimeError(f"Gemini classification failed on all models: {last_err}")
 
+    def _image_part(self, path: str):
+        data = Path(path).read_bytes()
+        lower = path.lower()
+        if lower.endswith('.png'):
+            mime = 'image/png'
+        elif lower.endswith(('.jpg', '.jpeg')):
+            mime = 'image/jpeg'
+        elif lower.endswith('.webp'):
+            mime = 'image/webp'
+        elif lower.endswith(('.tif', '.tiff')):
+            mime = 'image/tiff'
+        elif lower.endswith('.bmp'):
+            mime = 'image/bmp'
+        elif lower.endswith('.gif'):
+            mime = 'image/gif'
+        else:
+            mime = 'image/png'
+        return types.Part.from_bytes(data=data, mime_type=mime)
+
+    def _classify_images(self, image_paths: List[str], progress=None) -> Classification:
+        image_paths = image_paths[: self.MAX_IMAGES]
+        if not image_paths:
+            return Classification()
+        contents = [IMAGE_INSTRUCTION]
+        seed_parts = []
+        for p in image_paths:
+            try:
+                contents.append(self._image_part(p))
+                digest = hashlib.sha256(Path(p).read_bytes()).hexdigest()[:16]
+                seed_parts.append(f"{Path(p).name}:{digest}")
+            except Exception:
+                continue
+        if len(contents) == 1:
+            return Classification()
+        return self._generate(contents, "IMAGES::" + "|".join(seed_parts))
+
     @staticmethod
     def _dedupe(values: List[str]) -> List[str]:
         seen, out = set(), []
@@ -158,31 +203,20 @@ class AIProcessor:
                 out.append(v)
         return out
 
-    @staticmethod
-    def _first(*values):
-        for v in values:
-            if v and v.strip():
-                return v.strip()
-        return None
-
-    def classify(self, text: str, progress=None) -> Dict:
-        chunks = self._chunk(text)
+    def classify(self, text: str, image_paths: List[str] = None, progress=None) -> Dict:
+        chunks = self._chunk(text) if text.strip() else []
         merged = Classification()
         meta = {}
+
         for i, chunk in enumerate(chunks, 1):
             if progress:
-                progress(i, len(chunks))
-            result = self._classify_chunk(chunk)
-            for field in ("project_ref", "project_title", "delivery_location", "buyer"):
-                val = getattr(result, field)
-                if val and not meta.get(field):
-                    meta[field] = val
-            merged.line_items.extend(result.line_items)
-            merged.technical_requirements.extend(result.technical_requirements)
-            merged.commercial_requirements.extend(result.commercial_requirements)
-            merged.submission_rules.extend(result.submission_rules)
-            merged.mandatory_requirements.extend(result.mandatory_requirements)
-            merged.dates.extend(result.dates)
+                progress('text', i, len(chunks))
+            self._merge(merged, meta, self._generate(chunk, chunk))
+
+        if image_paths:
+            if progress:
+                progress('images', 1, 1)
+            self._merge(merged, meta, self._classify_images(image_paths))
 
         seen_items, line_items = set(), []
         for item in merged.line_items:
@@ -201,3 +235,16 @@ class AIProcessor:
             "dates": self._dedupe(merged.dates),
             "meta": meta,
         }
+
+    @staticmethod
+    def _merge(merged: Classification, meta: Dict, result: Classification):
+        for field in ("project_ref", "project_title", "delivery_location", "buyer"):
+            val = getattr(result, field)
+            if val and not meta.get(field):
+                meta[field] = val
+        merged.line_items.extend(result.line_items)
+        merged.technical_requirements.extend(result.technical_requirements)
+        merged.commercial_requirements.extend(result.commercial_requirements)
+        merged.submission_rules.extend(result.submission_rules)
+        merged.mandatory_requirements.extend(result.mandatory_requirements)
+        merged.dates.extend(result.dates)

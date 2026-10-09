@@ -27,8 +27,10 @@ def cli():
 @click.option('--itb-dir', default='./data/itb', help='Directory containing ITB files')
 @click.option('--output', default='./outputs/specification_sheet.docx', help='Output spec sheet path')
 @click.option('--pattern', default='*ITB*', help='Filename glob of source PDFs (default: *ITB*)')
+@click.option('--images', default=None, help='Comma-separated image globs to include (default: png/jpg/jpeg/webp/bmp)')
+@click.option('--no-images', is_flag=True, help='Do not send images to Gemini')
 @click.option('--model', default=None, help='Gemini model (default: gemini-3.8-flash)')
-def extract(itb_dir, output, pattern, model):
+def extract(itb_dir, output, pattern, images, no_images, model):
     """Steps 1 & 2: Extract and generate spec sheet (Gemini-classified)"""
     click.echo('Step 1: ITB Review & Line Item Extraction...')
     pdf_ext = PDFExtractor()
@@ -37,6 +39,17 @@ def extract(itb_dir, output, pattern, model):
         raise click.ClickException(f'No PDFs matching "{pattern}" found in {itb_dir}')
     click.echo(f'  - {len(results)} file(s) matched "{pattern}"')
     all_content = '\n\n'.join([r.get('content', '') for r in results if not r.get('error')])
+
+    image_paths = []
+    if not no_images:
+        globs = [g.strip() for g in images.split(',')] if images else None
+        image_paths += pdf_ext.collect_image_files(itb_dir, patterns=globs)
+        for r in results:
+            if not r.get('error'):
+                image_paths += pdf_ext.render_image_pages(r['path'], './outputs/extracted_images')
+        if image_paths:
+            click.echo(f'  - {len(image_paths)} image(s) will be sent to Gemini')
+
     click.echo('Classifying content with Gemini (separating line items from requirements)...')
     try:
         processor = AIProcessor(model=model)
@@ -44,7 +57,8 @@ def extract(itb_dir, output, pattern, model):
         raise click.ClickException(str(e))
     reqs = processor.classify(
         all_content,
-        progress=lambda i, n: click.echo(f'  - classifying chunk {i}/{n}'),
+        image_paths=image_paths,
+        progress=lambda kind, i, n: click.echo(f'  - classifying {kind} {i}/{n}'),
     )
     line_items = reqs['line_items']
     extracted_data = {
@@ -103,7 +117,8 @@ def analyze(itb_dir, pattern):
 
 @cli.command()
 def run_all():
-    extract.callback(itb_dir='./data/itb', output='./outputs/specification_sheet.docx', pattern='*ITB*', model=None)
+    extract.callback(itb_dir='./data/itb', output='./outputs/specification_sheet.docx',
+                     pattern='*ITB*', images=None, no_images=False, model=None)
     setup_vendors.callback()
     click.echo(click.style('\n? Workflow complete!', fg='green'))
 

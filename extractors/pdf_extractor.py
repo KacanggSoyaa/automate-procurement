@@ -4,6 +4,8 @@ import pdfplumber
 from pathlib import Path
 from typing import Dict, List
 
+IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff')
+
 class PDFExtractor:
     def __init__(self, engine: str = "pdfplumber"):
         self.engine = engine
@@ -38,3 +40,39 @@ class PDFExtractor:
                         'content': ''
                     })
         return results
+
+    def render_image_pages(self, pdf_path: str, out_dir: str, dpi: int = 150, min_text: int = 50) -> List[str]:
+        """Render PDF pages that contain images or almost no text (scanned/image-only pages)."""
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            try:
+                import fitz
+            except ImportError:
+                return []
+        out_paths = []
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+        doc = fitz.open(pdf_path)
+        try:
+            for i, page in enumerate(doc):
+                text = page.get_text().strip()
+                has_images = len(page.get_images(full=True)) > 0
+                if has_images or len(text) < min_text:
+                    pix = page.get_pixmap(dpi=dpi)
+                    out = Path(out_dir) / f"{Path(pdf_path).stem}_p{i + 1}.png"
+                    pix.save(str(out))
+                    out_paths.append(str(out))
+        finally:
+            doc.close()
+        return out_paths
+
+    def collect_image_files(self, folder: str, patterns: List[str] = None) -> List[str]:
+        """Collect standalone image files (e.g. screenshots) from a folder."""
+        patterns = patterns or ['*.png', '*.jpg', '*.jpeg', '*.webp', '*.bmp']
+        found = []
+        for fname in os.listdir(folder):
+            if fname.lower().endswith(IMAGE_EXTENSIONS) and any(
+                fnmatch.fnmatch(fname, p) for p in patterns
+            ):
+                found.append(os.path.join(folder, fname))
+        return sorted(found)
