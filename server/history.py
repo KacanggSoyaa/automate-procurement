@@ -82,6 +82,7 @@ class HistoryStore:
             "files": job.files,
             "created_at": job.created_at,
             "output_path": job.output_path,
+            "config": job.config,
             "data": job.data,
         }
         entry = record.copy()

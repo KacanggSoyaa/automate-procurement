@@ -107,6 +107,17 @@ def rename_history(job_id: str, body: RenameRequest):
     return entry
 
 
+@app.post("/api/jobs/{job_id}/files")
+async def add_job_files(job_id: str, files: List[UploadFile] = File(...)):
+    """Append files to a finished job's folder and reprocess only the new ones."""
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded.")
+    job = job_manager.add_and_reprocess(job_id, files)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return job.to_dict()
+
+
 @app.get("/api/jobs/{job_id}/download")
 def download(job_id: str):
     """Stream the generated specification sheet DOCX for a finished job."""

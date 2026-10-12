@@ -40,6 +40,20 @@ export async function getJob(id: string): Promise<Job> {
   return (await res.json()) as Job;
 }
 
+/** Append files to a finished job and reprocess only the new ones. */
+export async function addJobFiles(id: string, files: File[]): Promise<Job> {
+  const form = new FormData();
+  for (const file of files) {
+    form.append("files", file, file.name);
+  }
+  const res = await fetch(`${BASE}/jobs/${id}/files`, { method: "POST", body: form });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to add files (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as Job;
+}
+
 /** Build the download URL for a finished job's specification sheet. */
 export function downloadUrl(id: string): string {
   return `${BASE}/jobs/${id}/download`;

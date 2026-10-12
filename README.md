@@ -121,4 +121,9 @@ outputs/           Generated documents (gitignored)
   in `data/history.json` + `data/workspaces/<job_id>/job.json`. Reopen any past run to view its
   line items, RFQ email and download its spec sheet; hover an entry to **rename** or **delete**
   it (delete removes the stored workspace too).
+- **Add files to a finished run**: the results panel has an "add files to this ITB" box.
+  Uploading extra documents/screenshots reprocesses *only the new (or changed) files* with
+  Gemini and merges their line items into the existing run, then rebuilds the spec sheet
+  and RFQ email — no need to re-run the whole folder. Per-file content hashes (stored in the
+  job config) avoid double-processing, so a re-uploaded file with new content is picked up.
 - The RFQ email is generated deterministically (no API calls) — one email covering all line items.

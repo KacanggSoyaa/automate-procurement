@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createJob, deleteHistory, getJob, listHistory, renameHistory } from "./api";
+import AddFiles from "./components/AddFiles";
 import DropZone from "./components/DropZone";
 import HistorySidebar from "./components/HistorySidebar";
 import JobPanel from "./components/JobPanel";
@@ -149,6 +150,12 @@ export default function App() {
     }
   };
 
+  /** Set up polling for an incremental reprocess after files were added. */
+  const onFilesAdded = (updated: Job) => {
+    setJob(updated);
+    setPollId(updated.id);
+  };
+
   /** Start a fresh run: clear the current selection and results. */
   const startNew = () => {
     setFiles([]);
@@ -283,6 +290,13 @@ export default function App() {
           {job && (
             <div className="mt-5 space-y-5">
               <JobPanel job={job} />
+              {job.status === "done" && (
+                <AddFiles
+                  jobId={job.id}
+                  onProcessed={onFilesAdded}
+                  onError={(msg) => setError(msg)}
+                />
+              )}
               {job.status === "done" && <Results job={job} />}
               {job.status === "done" && <RfqEmails emails={job.result?.rfq_emails ?? []} />}
             </div>

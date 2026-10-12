@@ -30,6 +30,7 @@ class Job:
     output_path: Optional[str] = None
     files: List[str] = field(default_factory=list)
     data: Optional[Dict] = None
+    config: Optional[Dict] = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_dict(self) -> Dict:
@@ -63,6 +64,7 @@ class Job:
             output_path=record.get("output_path"),
             files=record.get("files", []),
             data=record.get("data"),
+            config=record.get("config"),
             created_at=record.get("created_at", ""),
         )
 
@@ -145,6 +147,7 @@ class JobManager:
                     job, stage=stage, current=cur, total=tot, message=msg, log=msg
                 ),
             )
+            job.config = self._build_config(model, include_images, pattern, skip_files, result["processed"])
             self._update(
                 job,
                 status="done",
@@ -153,6 +156,103 @@ class JobManager:
                 output_path=result["output_path"],
                 data=result["data"],
                 log="Pipeline complete",
+            )
+            history_store.save(job)
+        except Exception as e:
+            job.config = self._build_config(model, include_images, pattern, skip_files, {})
+            self._update(
+                job,
+                status="error",
+                stage="error",
+                message=str(e),
+                error=f"{type(e).__name__}: {e}",
+                log=f"ERROR: {e}",
+            )
+            history_store.save(job)
+            traceback.print_exc()
+
+    @staticmethod
+    def _build_config(model, include_images, pattern, skip_files, processed: Dict) -> Dict:
+        """Capture the settings that produced a run, incl. processed file hashes."""
+        return {
+            "model": model,
+            "include_images": include_images,
+            "pattern": pattern,
+            "skip_files": list(skip_files or []),
+            "processed": processed,
+        }
+
+    def add_and_reprocess(self, job_id: str, files: List) -> Optional[Job]:
+        """Append files to a finished job's folder and reprocess only the new ones."""
+        job = self.get(job_id)
+        if job is None:
+            return None
+
+        upload_dir = UPLOAD_ROOT / job_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        added = 0
+        for f in files:
+            name = Path(f.filename).name
+            if not name:
+                continue
+            dest = upload_dir / name
+            with open(dest, "wb") as out:
+                while True:
+                    chunk = f.file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+            if name not in job.files:
+                job.files.append(name)
+            added += 1
+
+        if not added:
+            return job
+        # Refuse to stack a second incremental run while one is already going.
+        if job.status in ("queued", "running"):
+            return job
+
+        record = history_store.load(job_id) or {}
+        cfg = job.config or (record.get("config") or {})
+        self._update(
+            job,
+            status="queued",
+            stage="queued",
+            current=0,
+            total=0,
+            message="Adding files…",
+            log=f"{added} file(s) added — reprocessing",
+        )
+        self._pool.submit(self._run_incremental, job, cfg, record)
+        return job
+
+    def _run_incremental(self, job: Job, cfg: Dict, record: Dict):
+        """Reprocess only new/changed files for a finished job and save results."""
+        upload_dir = str(UPLOAD_ROOT / job.id)
+        output_path = job.output_path or str(WORKSPACE_ROOT / job.id / "specification_sheet.docx")
+        self._update(job, status="running", stage="start", message="Reprocessing new files")
+        try:
+            result = run_pipeline(
+                input_dir=upload_dir,
+                output_path=output_path,
+                model=cfg.get("model"),
+                include_images=cfg.get("include_images", True),
+                pattern=cfg.get("pattern", "*"),
+                skip_files=cfg.get("skip_files"),
+                previous=record,
+                progress=lambda stage, cur, tot, msg: self._update(
+                    job, stage=stage, current=cur, total=tot, message=msg, log=msg
+                ),
+            )
+            job.config = {**cfg, "processed": result["processed"]}
+            self._update(
+                job,
+                status="done",
+                stage="done",
+                message="Specification sheet updated",
+                output_path=result["output_path"],
+                data=result["data"],
+                log="Incremental reprocess complete",
             )
             history_store.save(job)
         except Exception as e:
