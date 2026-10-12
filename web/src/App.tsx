@@ -235,7 +235,12 @@ export default function App() {
                 href={quota?.link ?? "https://ai.dev/rate-limit"}
                 target="_blank"
                 rel="noreferrer"
-                title={quota?.detail ?? "Google-Search grounding quota (last check)"}
+                title={
+                  quota?.detail ??
+                  (quota?.state === "unknown"
+                    ? "Quota not checked yet — run a supplier search"
+                    : "Google-Search grounding quota (last check)")
+                }
                 className="flex items-center gap-1.5 transition hover:text-paper-100"
               >
                 <span
@@ -247,7 +252,12 @@ export default function App() {
                         : "bg-paper-200/30"
                   }`}
                 />
-                quota: {quota ? quota.state : "…"}
+                quota:{" "}
+                {!quota
+                  ? "…"
+                  : quota.state === "unknown"
+                    ? "not checked"
+                    : quota.state}
               </a>
             </div>
           </header>

@@ -12,12 +12,14 @@ the UI as "verify before use".
 """
 import csv
 import io
+import json
 import os
 import random
 import threading
 import time
 import traceback
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel
@@ -35,6 +37,20 @@ SUPPLIER_MODES = ("all", "per_item")
 # the header can show it next to the pipeline label.
 _GROUNDING_STATE: Dict = {"state": "unknown", "model": None, "ts": None, "detail": None}
 _GROUNDING_STATE_LOCK = threading.Lock()
+_QUOTA_STATE_PATH = Path(__file__).resolve().parent.parent / "data" / "quota_state.json"
+
+
+def _load_grounding_state() -> None:
+    """Restore the last-known quota state so it survives server restarts."""
+    try:
+        data = json.loads(_QUOTA_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if isinstance(data, dict) and data.get("state") in ("ok", "exhausted"):
+        with _GROUNDING_STATE_LOCK:
+            _GROUNDING_STATE.update(
+                {k: data.get(k) for k in ("state", "model", "ts", "detail")}
+            )
 
 
 def _note_grounding(ok: bool, model: Optional[str] = None, detail: Optional[str] = None) -> None:
@@ -45,12 +61,21 @@ def _note_grounding(ok: bool, model: Optional[str] = None, detail: Optional[str]
             ts=datetime.now().isoformat(timespec="seconds"),
             detail=detail,
         )
+        payload = dict(_GROUNDING_STATE)
+    try:
+        _QUOTA_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _QUOTA_STATE_PATH.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def quota_status() -> Dict:
     """Current grounding-quota state plus the official usage page link."""
     with _GROUNDING_STATE_LOCK:
         return {**dict(_GROUNDING_STATE), "link": "https://ai.dev/rate-limit"}
+
+
+_load_grounding_state()
 
 try:
     from google import genai
