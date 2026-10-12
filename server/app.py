@@ -11,10 +11,11 @@ except ImportError:
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from .jobs import job_manager
+from .suppliers import quota_status, supplier_finder
 
 
 class RenameRequest(BaseModel):
@@ -37,6 +38,12 @@ app.add_middleware(
 def health():
     """Liveness probe used to check the backend is up."""
     return {"status": "ok"}
+
+
+@app.get("/api/quota")
+def get_quota():
+    """Last-known Google-Search grounding quota state shown in the header."""
+    return quota_status()
 
 
 def _parse_skip_files(raw: Optional[str]) -> List[str]:
@@ -131,6 +138,41 @@ def download_version(job_id: str, n: int):
         zip_path,
         media_type="application/zip",
         filename=f"specification_sheet_{zip_path.stem}_{job_id}.zip",
+    )
+
+
+@app.post("/api/jobs/{job_id}/suppliers")
+def find_suppliers(job_id: str, mode: str = "all"):
+    """Start supplier search for a finished run.
+
+    ``mode=all`` (default) runs one batched search covering every product at
+    once; ``mode=per_item`` runs a separate search per line item.
+    """
+    err = supplier_finder.start(job_id, mode)
+    if err:
+        if err == "Job not found.":
+            status = 404
+        elif err == "Supplier search is already running.":
+            status = 409
+        else:
+            status = 400
+        raise HTTPException(status_code=status, detail=err)
+    return job_manager.get(job_id).to_dict()
+
+
+@app.get("/api/jobs/{job_id}/suppliers/download.csv")
+def suppliers_csv(job_id: str):
+    """Export every shortlisted supplier as a CSV for the buyer's records."""
+    job = job_manager.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    content = supplier_finder.build_csv(job_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="No supplier data found.")
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="suppliers_{job_id}.csv"'},
     )
 
 

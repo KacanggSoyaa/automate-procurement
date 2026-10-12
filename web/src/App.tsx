@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { createJob, deleteHistory, getJob, listHistory, renameHistory } from "./api";
+import {
+  createJob,
+  deleteHistory,
+  getJob,
+  getQuotaStatus,
+  listHistory,
+  renameHistory,
+} from "./api";
 import AddFiles from "./components/AddFiles";
 import DropZone from "./components/DropZone";
 import HistorySidebar from "./components/HistorySidebar";
@@ -7,8 +14,9 @@ import JobPanel from "./components/JobPanel";
 import Results from "./components/Results";
 import RfqEmails from "./components/RfqEmails";
 import SettingsPanel, { parseSkipList } from "./components/SettingsPanel";
+import SupplierPanel from "./components/SupplierPanel";
 import VersionsAudit from "./components/VersionsAudit";
-import type { HistoryItem, Job } from "./types";
+import type { HistoryItem, Job, QuotaStatus } from "./types";
 
 /** Format a byte count as a short human-readable string (B / KB / MB). */
 function formatBytes(bytes: number): string {
@@ -33,6 +41,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [includeImages, setIncludeImages] = useState(true);
   const [skipFiles, setSkipFiles] = useState("");
+  const [quota, setQuota] = useState<QuotaStatus | null>(null);
 
   // Total size of the selected files, shown in the file summary bar.
   const totalSize = useMemo(() => files.reduce((sum, f) => sum + f.size, 0), [files]);
@@ -53,6 +62,25 @@ export default function App() {
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  // Refresh the Google-Search grounding quota badge every 30s (cheap, no API cost).
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const q = await getQuotaStatus();
+        if (!cancelled) setQuota(q);
+      } catch {
+        /* backend not up yet; try again next tick */
+      }
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   // Poll the in-flight job every 1.5s until it is done or has errored. This is
   // keyed on the job id (not the displayed job) so navigating to history
@@ -202,6 +230,25 @@ export default function App() {
             <div className="flex items-center gap-2 font-mono text-[11px] text-paper-200/50">
               <span className="h-1.5 w-1.5 rounded-full bg-teal animate-pulse-dot" />
               gemini vision pipeline
+              <span className="text-paper-200/25">·</span>
+              <a
+                href={quota?.link ?? "https://ai.dev/rate-limit"}
+                target="_blank"
+                rel="noreferrer"
+                title={quota?.detail ?? "Google-Search grounding quota (last check)"}
+                className="flex items-center gap-1.5 transition hover:text-paper-100"
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    quota?.state === "exhausted"
+                      ? "bg-danger"
+                      : quota?.state === "ok"
+                        ? "bg-teal"
+                        : "bg-paper-200/30"
+                  }`}
+                />
+                quota: {quota ? quota.state : "…"}
+              </a>
             </div>
           </header>
 
@@ -299,6 +346,7 @@ export default function App() {
                 />
               )}
               {job.status === "done" && <Results job={job} />}
+              {job.status === "done" && <SupplierPanel job={job} onError={(msg) => setError(msg)} onUpdated={setJob} />}
               {job.status === "done" && <VersionsAudit job={job} />}
               {job.status === "done" && <RfqEmails emails={job.result?.rfq_emails ?? []} />}
             </div>

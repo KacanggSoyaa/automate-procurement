@@ -6,14 +6,20 @@ results on disk so repeat runs do not spend extra API quota.
 import os
 import json
 import re
+import sys
 import time
 import hashlib
 import random
-import socket as _socket
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from server import netfix  # noqa: F401,E402  (applies IPv4-first DNS at import)
 
 try:
     from google import genai
@@ -21,28 +27,6 @@ try:
 except ImportError:
     genai = None
     types = None
-
-
-def _prefer_ipv4(*args, **kwargs):
-    """Reorder getaddrinfo results so IPv4 is tried before IPv6.
-
-    On networks without a working IPv6 route, the IPv6-first addresses that
-    DNS commonly returns hang the TLS connect (no fallback). Moving any IPv4
-    addresses to the front keeps Gemini reachable everywhere.
-    """
-    results = _orig_getaddrinfo(*args, **kwargs)
-    ipv4 = [r for r in results if r[0] == _socket.AF_INET]
-    if not ipv4:
-        return results
-    ipv6 = [r for r in results if r[0] == _socket.AF_INET6]
-    return ipv4 + ipv6
-
-
-try:
-    _orig_getaddrinfo = _socket.getaddrinfo
-    _socket.getaddrinfo = _prefer_ipv4
-except Exception:
-    pass
 
 # A real quantity must start with a digit (e.g. "1.000", "5 Units"); phrases
 # like "ESTIMATED QTY FOR 3 YEARS" are not valid quantities.

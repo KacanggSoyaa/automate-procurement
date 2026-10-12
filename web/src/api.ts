@@ -1,4 +1,4 @@
-import type { HistoryItem, Job } from "./types";
+import type { HistoryItem, Job, QuotaStatus, SupplierMode } from "./types";
 
 const BASE = "/api";
 
@@ -62,6 +62,31 @@ export function downloadUrl(id: string): string {
 /** Build the download URL for one historical version snapshot (zip). */
 export function downloadVersionUrl(id: string, version: number): string {
   return `${BASE}/jobs/${id}/versions/${version}/download`;
+}
+
+/** Start supplier search for a finished job. `mode="all"` batches every product
+ *  into one search; ``mode="per_item"` runs one search per line item. */
+export async function findSuppliers(id: string, mode: SupplierMode = "all"): Promise<Job> {
+  const res = await fetch(`${BASE}/jobs/${id}/suppliers?mode=${mode}`, { method: "POST" });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to start supplier search (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as Job;
+}
+
+/** Build the CSV export URL for a job's supplier shortlists. */
+export function suppliersCsvUrl(id: string): string {
+  return `${BASE}/jobs/${id}/suppliers/download.csv`;
+}
+
+/** Fetch the Google-Search grounding quota state for the header. */
+export async function getQuotaStatus(): Promise<QuotaStatus> {
+  const res = await fetch(`${BASE}/quota`);
+  if (!res.ok) {
+    throw new Error(`Failed to load quota status (${res.status})`);
+  }
+  return (await res.json()) as QuotaStatus;
 }
 
 /** Fetch the saved history of finished ITB runs (newest first). */

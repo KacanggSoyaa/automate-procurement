@@ -21,6 +21,37 @@ export interface RfqEmail {
   body: string;
 }
 
+/** One shortlisted supplier found via a live, grounded web search. */
+export interface Supplier {
+  company_name: string;
+  website: string;
+  email: string;
+  contact: string;
+  source: string;
+}
+
+/** Supplier shortlist state for one product (line item). */
+export interface ProductSuppliers {
+  item_no?: string | null;
+  item_name?: string | null;
+  status: "pending" | "searching" | "done" | "error";
+  message?: string;
+  backend?: "search_grounding" | "web_search" | null;
+  suppliers: Supplier[];
+}
+
+/** How supplier search is run: one batched search for all items, or per item. */
+export type SupplierMode = "all" | "per_item";
+
+/** Google-Search grounding quota state shown in the header. */
+export interface QuotaStatus {
+  state: "ok" | "exhausted" | "unknown";
+  model: string | null;
+  ts: string | null;
+  detail: string | null;
+  link: string;
+}
+
 /** Trimmed result payload the API returns once a job is done. */
 export interface JobResult {
   files_processed: number;
@@ -37,6 +68,7 @@ export interface JobResult {
   technical_count: number;
   submission_count: number;
   mandatory_count: number;
+  suppliers: ProductSuppliers[];
   has_output: boolean;
 }
 

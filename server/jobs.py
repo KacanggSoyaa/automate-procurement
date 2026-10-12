@@ -91,6 +91,7 @@ class Job:
             "technical_count": len(d.get("technical_requirements", [])),
             "submission_count": len(d.get("submission_rules", [])),
             "mandatory_count": len(d.get("mandatory_requirements", [])),
+            "suppliers": d.get("suppliers", []),
             "has_output": bool(self.output_path),
         }
 

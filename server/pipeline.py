@@ -193,6 +193,7 @@ def run_pipeline(
             (prev_data.get("commercial_requirements") or []) + reqs["commercial"]
         ),
         "dates": _dedupe_strs((prev_data.get("dates") or []) + reqs["dates"]),
+        "suppliers": prev_data.get("suppliers") or [],
     }
 
     # One copy-ready RFQ email per line item (deterministic, no API calls).
