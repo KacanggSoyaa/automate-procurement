@@ -1,7 +1,9 @@
 """In-memory job queue that runs the extraction pipeline in a thread pool."""
+import shutil
 import threading
 import traceback
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -31,6 +33,8 @@ class Job:
     files: List[str] = field(default_factory=list)
     data: Optional[Dict] = None
     config: Optional[Dict] = None
+    versions: List[Dict] = field(default_factory=list)
+    audit: List[Dict] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_dict(self) -> Dict:
@@ -46,6 +50,8 @@ class Job:
             "error": self.error,
             "files": self.files,
             "result": self._result_summary(),
+            "versions": self.versions,
+            "audit": self.audit[-100:],
             "created_at": self.created_at,
         }
 
@@ -65,6 +71,8 @@ class Job:
             files=record.get("files", []),
             data=record.get("data"),
             config=record.get("config"),
+            versions=record.get("versions", []),
+            audit=record.get("audit", []),
             created_at=record.get("created_at", ""),
         )
 
@@ -121,6 +129,14 @@ class JobManager:
         with self._lock:
             self._jobs[job_id] = job
 
+        if job.files:
+            more = "…" if len(job.files) > 3 else ""
+            self._audit(
+                job,
+                "run_created",
+                f"{len(job.files)} file(s) uploaded: {', '.join(job.files[:3])}{more}",
+            )
+
         workspace = WORKSPACE_ROOT / job_id
         workspace.mkdir(parents=True, exist_ok=True)
         output_path = workspace / "specification_sheet.docx"
@@ -157,6 +173,13 @@ class JobManager:
                 data=result["data"],
                 log="Pipeline complete",
             )
+            v = self._snapshot_version(job, "run")
+            self._audit(
+                job,
+                "run_completed",
+                f"Specification sheet saved as {v['tag']}",
+                version=v["id"] if v else None,
+            )
             history_store.save(job)
         except Exception as e:
             job.config = self._build_config(model, include_images, pattern, skip_files, {})
@@ -168,6 +191,7 @@ class JobManager:
                 error=f"{type(e).__name__}: {e}",
                 log=f"ERROR: {e}",
             )
+            self._audit(job, "run_failed", str(e))
             history_store.save(job)
             traceback.print_exc()
 
@@ -214,6 +238,7 @@ class JobManager:
 
         record = history_store.load(job_id) or {}
         cfg = job.config or (record.get("config") or {})
+        self._audit(job, "files_added", f"{added} file(s) added, reprocessing queued")
         self._update(
             job,
             status="queued",
@@ -254,6 +279,13 @@ class JobManager:
                 data=result["data"],
                 log="Incremental reprocess complete",
             )
+            v = self._snapshot_version(job, "reprocess")
+            self._audit(
+                job,
+                "reprocess_completed",
+                f"Updated specification sheet saved as {v['tag']}",
+                version=v["id"] if v else None,
+            )
             history_store.save(job)
         except Exception as e:
             self._update(
@@ -264,8 +296,73 @@ class JobManager:
                 error=f"{type(e).__name__}: {e}",
                 log=f"ERROR: {e}",
             )
+            self._audit(job, "reprocess_failed", str(e))
             history_store.save(job)
             traceback.print_exc()
+
+    def _snapshot_version(self, job: Job, reason: str) -> Optional[Dict]:
+        """Copy a finished run's output files into an immutable, versioned folder.
+
+        Returns a ``{id, tag, ts, reason, files, ...}`` summary, or None when
+        the run produced no output file.
+        """
+        out = Path(job.output_path) if job.output_path else WORKSPACE_ROOT / job.id / "specification_sheet.docx"
+        wdir = out.parent
+        if not wdir.is_dir() or not out.exists():
+            return None
+        with self._lock:
+            n = max((v["id"] for v in job.versions), default=0) + 1
+        vdir = wdir / "versions" / f"v{n:02d}"
+        vdir.mkdir(parents=True, exist_ok=True)
+        copied: List[str] = []
+        for f in sorted(wdir.iterdir()):
+            if f.is_file() and f.name != "job.json":
+                try:
+                    shutil.copy2(f, vdir / f.name)
+                    copied.append(f.name)
+                except Exception:
+                    continue
+        version = {
+            "id": n,
+            "tag": f"v{n:02d}",
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "reason": reason,
+            "files": copied,
+            "files_processed": (job.data or {}).get("files_processed", 0),
+            "line_items_count": (job.data or {}).get("line_items_count", 0),
+        }
+        with self._lock:
+            job.versions.append(version)
+        return version
+
+    def _audit(self, job: Job, action: str, detail: str = "", version: Optional[int] = None):
+        """Append an immutable event to a job's audit trail."""
+        event = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "actor": "system",
+            "action": action,
+            "detail": detail,
+        }
+        if version is not None:
+            event["version"] = version
+        with self._lock:
+            job.audit.append(event)
+
+    def version_zip(self, job_id: str, n: int) -> Optional[Path]:
+        """Return (creating on demand) the zip snapshot for one version, or None."""
+        vdir = WORKSPACE_ROOT / job_id / "versions" / f"v{n:02d}"
+        if not vdir.is_dir():
+            return None
+        zip_path = vdir.parent / f"v{n:02d}.zip"
+        if not zip_path.exists():
+            try:
+                with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+                    for f in sorted(vdir.iterdir()):
+                        if f.is_file():
+                            z.write(f, arcname=f"{vdir.name}/{f.name}")
+            except Exception:
+                return None
+        return zip_path
 
     def _update(self, job: Job, log: Optional[str] = None, **fields):
         """Thread-safely set job fields and optionally append a timestamped log."""

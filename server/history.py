@@ -84,6 +84,8 @@ class HistoryStore:
             "output_path": job.output_path,
             "config": job.config,
             "data": job.data,
+            "versions": job.versions,
+            "audit": job.audit[-100:],
         }
         entry = record.copy()
         entry.pop("logs", None)
@@ -96,6 +98,7 @@ class HistoryStore:
             "subtitle": subtitle,
             "line_items_count": data.get("line_items_count", len(data.get("line_items", []) or [])),
             "files_count": len(job.files),
+            "version_count": len(job.versions),
             "project_ref": (data.get("meta") or {}).get("project_ref"),
             "buyer": (data.get("meta") or {}).get("buyer"),
         })

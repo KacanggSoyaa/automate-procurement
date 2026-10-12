@@ -59,6 +59,11 @@ export function downloadUrl(id: string): string {
   return `${BASE}/jobs/${id}/download`;
 }
 
+/** Build the download URL for one historical version snapshot (zip). */
+export function downloadVersionUrl(id: string, version: number): string {
+  return `${BASE}/jobs/${id}/versions/${version}/download`;
+}
+
 /** Fetch the saved history of finished ITB runs (newest first). */
 export async function listHistory(): Promise<HistoryItem[]> {
   const res = await fetch(`${BASE}/history`);

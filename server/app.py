@@ -118,6 +118,22 @@ async def add_job_files(job_id: str, files: List[UploadFile] = File(...)):
     return job.to_dict()
 
 
+@app.get("/api/jobs/{job_id}/versions/{n}/download")
+def download_version(job_id: str, n: int):
+    """Download a historical version snapshot (zip) of a finished job."""
+    job = job_manager.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    zip_path = job_manager.version_zip(job_id, n)
+    if zip_path is None:
+        raise HTTPException(status_code=404, detail="Version not found.")
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=f"specification_sheet_{zip_path.stem}_{job_id}.zip",
+    )
+
+
 @app.get("/api/jobs/{job_id}/download")
 def download(job_id: str):
     """Stream the generated specification sheet DOCX for a finished job."""

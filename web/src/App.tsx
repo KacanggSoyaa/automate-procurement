@@ -7,6 +7,7 @@ import JobPanel from "./components/JobPanel";
 import Results from "./components/Results";
 import RfqEmails from "./components/RfqEmails";
 import SettingsPanel, { parseSkipList } from "./components/SettingsPanel";
+import VersionsAudit from "./components/VersionsAudit";
 import type { HistoryItem, Job } from "./types";
 
 /** Format a byte count as a short human-readable string (B / KB / MB). */
@@ -298,6 +299,7 @@ export default function App() {
                 />
               )}
               {job.status === "done" && <Results job={job} />}
+              {job.status === "done" && <VersionsAudit job={job} />}
               {job.status === "done" && <RfqEmails emails={job.result?.rfq_emails ?? []} />}
             </div>
           )}

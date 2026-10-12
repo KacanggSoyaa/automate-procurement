@@ -49,6 +49,26 @@ export interface JobLog {
   message: string;
 }
 
+/** A versioned, immutable snapshot of a finished run's output files. */
+export interface VersionInfo {
+  id: number;
+  tag: string;
+  ts: string;
+  reason: "run" | "reprocess";
+  files: string[];
+  files_processed: number;
+  line_items_count: number;
+}
+
+/** One immutable entry in a job's audit trail. */
+export interface AuditEvent {
+  ts: string;
+  actor: string;
+  action: string;
+  detail: string;
+  version?: number | null;
+}
+
 /** Full job state as returned by the backend API. */
 export interface Job {
   id: string;
@@ -61,6 +81,8 @@ export interface Job {
   error?: string | null;
   files: string[];
   result: JobResult | null;
+  versions: VersionInfo[];
+  audit: AuditEvent[];
   created_at: string;
 }
 
