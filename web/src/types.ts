@@ -63,3 +63,16 @@ export interface Job {
   result: JobResult | null;
   created_at: string;
 }
+
+/** One saved ITB run shown in the history sidebar. */
+export interface HistoryItem {
+  id: string;
+  status: JobStatus;
+  created_at: string;
+  title: string;
+  subtitle: string;
+  line_items_count: number;
+  files_count: number;
+  project_ref?: string | null;
+  buyer?: string | null;
+}

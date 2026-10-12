@@ -102,14 +102,14 @@ several models and caches results in `data/.ai_cache/`, so repeat runs cost no e
 ## Project structure
 
 ```
-server/            FastAPI backend (app.py, jobs.py, pipeline.py)
+server/            FastAPI backend (app.py, jobs.py, pipeline.py, history.py)
 processors/        Gemini classification (ai_processor.py)
 extractors/        PDF (pdf_extractor.py) + Word/Excel (office_extractor.py)
 generators/        Spec sheet (enhanced_spec_sheet.py), RFQ email (rfq_email_generator.py),
                    RFQ dispatch (rfq_dispatcher.py), layout reference (technicalSpecFormat.py)
 cli.py             Command-line entry point
-web/               Vite + React + Tailwind UI
-data/              uploads, workspaces, vendor list, AI cache (gitignored)
+web/               Vite + React + Tailwind UI (history sidebar + results)
+data/              uploads, workspaces, history index, vendor list, AI cache (gitignored)
 outputs/           Generated documents (gitignored)
 ```
 
@@ -117,5 +117,8 @@ outputs/           Generated documents (gitignored)
 
 - `data/itb/`, `data/uploads/`, `data/workspaces/`, `data/.ai_cache/` and `outputs/` are gitignored and may hold
   confidential bid documents — never commit them.
-- The web backend keeps jobs in memory; restarting it clears job history.
+- Finished runs are saved to a **history** sidebar (left of the UI) and persist across restarts
+  in `data/history.json` + `data/workspaces/<job_id>/job.json`. Reopen any past run to view its
+  line items, RFQ email and download its spec sheet; hover an entry to **rename** or **delete**
+  it (delete removes the stored workspace too).
 - The RFQ email is generated deterministically (no API calls) — one email covering all line items.

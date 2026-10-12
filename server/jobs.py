@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .history import history_store
 from .pipeline import run_pipeline
 
 # Where uploaded files and per-job output workspaces are stored.
@@ -46,6 +47,24 @@ class Job:
             "result": self._result_summary(),
             "created_at": self.created_at,
         }
+
+    @classmethod
+    def from_record(cls, record: Dict) -> "Job":
+        """Rebuild a Job from a persisted history record (for reload after restart)."""
+        return cls(
+            id=record.get("id", ""),
+            status=record.get("status", "done"),
+            stage=record.get("stage", "done"),
+            current=record.get("current", 0),
+            total=record.get("total", 0),
+            message=record.get("message", ""),
+            logs=record.get("logs", []),
+            error=record.get("error"),
+            output_path=record.get("output_path"),
+            files=record.get("files", []),
+            data=record.get("data"),
+            created_at=record.get("created_at", ""),
+        )
 
     def _result_summary(self):
         """Return the trimmed result payload, or None while the job runs."""
@@ -135,6 +154,7 @@ class JobManager:
                 data=result["data"],
                 log="Pipeline complete",
             )
+            history_store.save(job)
         except Exception as e:
             self._update(
                 job,
@@ -144,6 +164,7 @@ class JobManager:
                 error=f"{type(e).__name__}: {e}",
                 log=f"ERROR: {e}",
             )
+            history_store.save(job)
             traceback.print_exc()
 
     def _update(self, job: Job, log: Optional[str] = None, **fields):
@@ -156,9 +177,32 @@ class JobManager:
                 job.logs.append({"ts": datetime.now().strftime("%H:%M:%S"), "message": log})
 
     def get(self, job_id: str) -> Optional[Job]:
-        """Look up a job by id, or return None if it does not exist."""
+        """Look up a live job, or rebuild one from persisted history."""
         with self._lock:
-            return self._jobs.get(job_id)
+            job = self._jobs.get(job_id)
+        if job is not None:
+            return job
+        record = history_store.load(job_id)
+        if record is None:
+            return None
+        loaded = Job.from_record(record)
+        with self._lock:
+            self._jobs[job_id] = loaded
+        return loaded
+
+    def history(self) -> List[Dict]:
+        """Return the persisted history index (newest first)."""
+        return history_store.list()
+
+    def delete(self, job_id: str) -> bool:
+        """Drop a job from memory and disk, returning whether it existed."""
+        with self._lock:
+            self._jobs.pop(job_id, None)
+        return history_store.delete(job_id)
+
+    def rename(self, job_id: str, title: str) -> Optional[Dict]:
+        """Rename a saved history entry; returns the updated entry or None."""
+        return history_store.rename(job_id, title)
 
 
 job_manager = JobManager()

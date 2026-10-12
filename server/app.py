@@ -12,8 +12,14 @@ except ImportError:
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from .jobs import job_manager
+
+
+class RenameRequest(BaseModel):
+    """Body for renaming a saved history entry."""
+    title: str
 
 app = FastAPI(title="Automate Procurement API", version="0.1.0")
 
@@ -73,6 +79,32 @@ def get_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
     return job.to_dict()
+
+
+@app.get("/api/history")
+def list_history():
+    """Return the saved history of finished ITB runs, newest first."""
+    return {"jobs": job_manager.history()}
+
+
+@app.delete("/api/history/{job_id}")
+def delete_history(job_id: str):
+    """Remove a run from the history list and delete its stored workspace."""
+    if not job_manager.delete(job_id):
+        raise HTTPException(status_code=404, detail="History entry not found.")
+    return {"ok": True, "id": job_id}
+
+
+@app.patch("/api/history/{job_id}")
+def rename_history(job_id: str, body: RenameRequest):
+    """Rename a saved history entry (sets a custom display title)."""
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title must not be empty.")
+    entry = job_manager.rename(job_id, title)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="History entry not found.")
+    return entry
 
 
 @app.get("/api/jobs/{job_id}/download")

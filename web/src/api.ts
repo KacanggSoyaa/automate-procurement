@@ -1,4 +1,4 @@
-import type { Job } from "./types";
+import type { HistoryItem, Job } from "./types";
 
 const BASE = "/api";
 
@@ -43,4 +43,35 @@ export async function getJob(id: string): Promise<Job> {
 /** Build the download URL for a finished job's specification sheet. */
 export function downloadUrl(id: string): string {
   return `${BASE}/jobs/${id}/download`;
+}
+
+/** Fetch the saved history of finished ITB runs (newest first). */
+export async function listHistory(): Promise<HistoryItem[]> {
+  const res = await fetch(`${BASE}/history`);
+  if (!res.ok) {
+    throw new Error(`Failed to load history (${res.status})`);
+  }
+  const data = (await res.json()) as { jobs: HistoryItem[] };
+  return data.jobs ?? [];
+}
+
+/** Delete a saved history entry and its stored workspace. */
+export async function deleteHistory(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/history/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    throw new Error(`Failed to delete history entry (${res.status})`);
+  }
+}
+
+/** Rename a saved history entry; returns the updated entry. */
+export async function renameHistory(id: string, title: string): Promise<HistoryItem> {
+  const res = await fetch(`${BASE}/history/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to rename history entry (${res.status})`);
+  }
+  return (await res.json()) as HistoryItem;
 }

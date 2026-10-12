@@ -32,6 +32,7 @@ data/specs/*
 # Server runtime (uploaded jobs + working copies)
 data/uploads/
 data/workspaces/
+data/history.json
 
 # Frontend
 web/node_modules/
