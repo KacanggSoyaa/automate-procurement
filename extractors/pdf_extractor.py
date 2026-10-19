@@ -1,7 +1,6 @@
 """PDF text and image extraction utilities for ITB packages."""
 import os
 import fnmatch
-from pathlib import Path
 from typing import Dict, List
 
 # PyMuPDF is the primary engine (fast); pdfplumber is a pure-Python fallback.
@@ -80,26 +79,6 @@ class PDFExtractor:
                         'content': ''
                     })
         return results
-
-    def render_image_pages(self, pdf_path: str, out_dir: str, dpi: int = 150, min_text: int = 50) -> List[str]:
-        """Render PDF pages that contain images or almost no text (scanned/image-only pages)."""
-        if fitz is None:
-            return []
-        out_paths = []
-        Path(out_dir).mkdir(parents=True, exist_ok=True)
-        doc = fitz.open(pdf_path)
-        try:
-            for i, page in enumerate(doc):
-                text = page.get_text().strip()
-                has_images = len(page.get_images(full=True)) > 0
-                if has_images or len(text) < min_text:
-                    pix = page.get_pixmap(dpi=dpi)
-                    out = Path(out_dir) / f"{Path(pdf_path).stem}_p{i + 1}.png"
-                    pix.save(str(out))
-                    out_paths.append(str(out))
-        finally:
-            doc.close()
-        return out_paths
 
     def collect_image_files(self, folder: str, patterns: List[str] = None) -> List[str]:
         """Collect standalone image files (e.g. screenshots) from a folder."""

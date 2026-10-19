@@ -158,11 +158,7 @@ def run_pipeline(
         for p in new_screens:
             if Path(p).name not in source_files:
                 source_files.append(Path(p).name)
-        render_dir = str(Path(output_path).parent / "extracted_images")
-        for r in new_docs:
-            if r["path"].lower().endswith(".pdf"):
-                image_paths += pdf_ext.render_image_pages(r["path"], render_dir)
-        emit("images", 1, 1, f"Found {len(image_paths)} new image(s)")
+        emit("images", 1, 1, f"Found {len(new_screens)} new image(s)")
 
     processor = AIProcessor(model=model)
 

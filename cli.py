@@ -62,17 +62,14 @@ def extract(itb_dir, output, pattern, images, no_images, model, skip):
     click.echo(f'  - {len(results)} file(s) matched "{pattern}"')
     all_content = '\n\n'.join([r.get('content', '') for r in docs])
 
-    # Collect standalone screenshots and render image-heavy PDF pages so the
-    # model can read tables/specs that exist only as pictures.
+    # Collect standalone screenshots / image files. PDF pages are never turned
+    # into images; text-only PDFs are read via their text layer.
     image_paths = []
     if not no_images:
         globs = [g.strip() for g in images.split(',')] if images else None
         images_found = pdf_ext.collect_image_files(itb_dir, patterns=globs)
         image_paths += images_found
         source_files += [Path(p).name for p in images_found]
-        for r in docs:
-            if r['path'].lower().endswith('.pdf'):
-                image_paths += pdf_ext.render_image_pages(r['path'], './outputs/extracted_images')
         if image_paths:
             click.echo(f'  - {len(image_paths)} image(s) will be sent to Gemini')
 
