@@ -26,15 +26,21 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Top-level sections reachable from the navbar. */
-const TABS = [
+/** Sections always shown on the homepage. */
+const BASE_TABS = [
   { id: "pipeline", label: "pipeline" },
-  { id: "suppliers", label: "supplier search" },
   { id: "directory", label: "supplier list" },
+] as const;
+
+/** Extra sections that only appear once a saved project is opened. */
+const PROJECT_TABS = [
+  { id: "suppliers", label: "supplier search" },
   { id: "emails", label: "quotation email" },
 ] as const;
 
-type TabId = (typeof TABS)[number]["id"];
+type TabId =
+  | (typeof BASE_TABS)[number]["id"]
+  | (typeof PROJECT_TABS)[number]["id"];
 
 /**
  * Root component: holds the selected files, starts a processing job and polls
@@ -54,6 +60,13 @@ export default function App() {
   const [skipFiles, setSkipFiles] = useState("");
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const [tab, setTab] = useState<TabId>("pipeline");
+  // When a saved project is opened from history, reveal the extra navbar
+  // sections (supplier search, quotation email) and the per-run panels.
+  const [projectView, setProjectView] = useState(false);
+
+  // Tabs shown in the navbar: the two homepage sections, plus the project-only
+  // sections when a saved project is open.
+  const tabs = projectView ? [...BASE_TABS, ...PROJECT_TABS] : [...BASE_TABS];
 
   // Total size of the selected files, shown in the file summary bar.
   const totalSize = useMemo(() => files.reduce((sum, f) => sum + f.size, 0), [files]);
@@ -147,6 +160,7 @@ export default function App() {
     setBusy(true);
     setError(null);
     setJob(null);
+    setProjectView(false);
     try {
       const j = await createJob(files, { includeImages, skipFiles: parseSkipList(skipFiles) });
       setJob(j);
@@ -165,6 +179,7 @@ export default function App() {
     setSidebarOpen(false);
     try {
       setJob(await getJob(id));
+      setProjectView(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -204,6 +219,8 @@ export default function App() {
     setError(null);
     setSkipFiles("");
     setSidebarOpen(false);
+    setProjectView(false);
+    setTab("pipeline");
   };
 
   const done = job?.status === "done";
@@ -281,7 +298,7 @@ export default function App() {
 
           <nav className="mx-auto max-w-4xl px-6">
             <ul className="-mb-px flex gap-6 overflow-x-auto font-mono text-xs uppercase tracking-widest">
-              {TABS.map((t) => (
+              {tabs.map((t) => (
                 <li key={t.id}>
                   <button
                     onClick={() => setTab(t.id)}
@@ -292,16 +309,6 @@ export default function App() {
                     }`}
                   >
                     {t.label}
-                    {t.id === "suppliers" && done && (job.result?.suppliers?.length ?? 0) > 0 && (
-                      <span className="rounded-full bg-ink-800 px-1.5 py-0.5 text-[10px] text-paper-200/60">
-                        {job.result?.suppliers?.length}
-                      </span>
-                    )}
-                    {t.id === "emails" && done && (job.result?.rfq_emails?.length ?? 0) > 0 && (
-                      <span className="rounded-full bg-ink-800 px-1.5 py-0.5 text-[10px] text-paper-200/60">
-                        {job.result?.rfq_emails?.length}
-                      </span>
-                    )}
                   </button>
                 </li>
               ))}
@@ -319,7 +326,7 @@ export default function App() {
           {/* ── 01 · pipeline: upload, run, results ─────────────────────── */}
           <section className={tab === "pipeline" ? "" : "hidden"}>
             <section className="pb-8 pt-6">
-              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 01 / 04 — Pipeline</p>
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 01 / 02 — Pipeline</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
                 Drop an ITB folder.
                 <br />
@@ -403,22 +410,30 @@ export default function App() {
                 )}
                 {done && <Results job={job} />}
                 {done && <VersionsAudit job={job} />}
-                {done && (
-                  <button
-                    onClick={() => setTab("suppliers")}
-                    className="w-full rounded-xl border border-ink-700 bg-ink-900/70 px-4 py-3 font-mono text-xs text-paper-200/70 transition hover:border-amber/50 hover:text-amber"
-                  >
-                    next: find suppliers for this run →
-                  </button>
-                )}
               </div>
             )}
           </section>
 
-          {/* ── 02 · supplier search ────────────────────────────────────── */}
+          {/* ── 02 · supplier list (master directory) ───────────────────── */}
+          <section className={tab === "directory" ? "" : "hidden"}>
+            <section className="pb-8 pt-6">
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 02 / 02 — Supplier List</p>
+              <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
+                Your supplier directory.
+              </h1>
+              <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
+                Add suppliers by hand or import a run's shortlist. This master list is saved on the
+                server and stays available for every future ITB, no matter which run you have open.
+              </p>
+            </section>
+
+            <SupplierDirectory job={job} onError={(msg) => setError(msg)} />
+          </section>
+
+          {/* ── 03 · supplier search (project) ──────────────────────────── */}
           <section className={tab === "suppliers" ? "" : "hidden"}>
             <section className="pb-8 pt-6">
-              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 02 / 04 — Supplier Search</p>
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Project — Supplier Search</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
                 Shortlist suppliers.
               </h1>
@@ -433,38 +448,16 @@ export default function App() {
             ) : (
               <div className="rounded-2xl border border-dashed border-ink-700 bg-ink-900/40 p-8 text-center">
                 <p className="font-mono text-xs text-paper-200/50">
-                  {job ? "Run the pipeline first — supplier search unlocks when it finishes." : "No run selected yet — upload a package in the pipeline section."}
+                  This project's pipeline must be finished before supplier search unlocks.
                 </p>
-                <button
-                  onClick={() => setTab("pipeline")}
-                  className="mt-4 rounded-lg border border-ink-600 px-4 py-2 font-mono text-xs text-paper-200/70 transition hover:border-amber/50 hover:text-amber"
-                >
-                  ← go to pipeline
-                </button>
               </div>
             )}
           </section>
 
-          {/* ── 03 · supplier list (master directory) ───────────────────── */}
-          <section className={tab === "directory" ? "" : "hidden"}>
-            <section className="pb-8 pt-6">
-              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 03 / 04 — Supplier List</p>
-              <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
-                Your supplier directory.
-              </h1>
-              <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
-                Add suppliers by hand or import a run's shortlist. This master list is saved on the
-                server and stays available for every future ITB, no matter which run you have open.
-              </p>
-            </section>
-
-            <SupplierDirectory job={job} onError={(msg) => setError(msg)} />
-          </section>
-
-          {/* ── 04 · quotation email ────────────────────────────────────── */}
+          {/* ── 04 · quotation email (project) ──────────────────────────── */}
           <section className={tab === "emails" ? "" : "hidden"}>
             <section className="pb-8 pt-6">
-              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 04 / 04 — Quotation Email</p>
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Project — Quotation Email</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
                 Copy-ready RFQ emails.
               </h1>
@@ -479,14 +472,8 @@ export default function App() {
             ) : (
               <div className="rounded-2xl border border-dashed border-ink-700 bg-ink-900/40 p-8 text-center">
                 <p className="font-mono text-xs text-paper-200/50">
-                  {job ? "Run the pipeline first — quotation emails are generated with the results." : "No run selected yet — upload a package in the pipeline section."}
+                  This project's pipeline must be finished before quotation emails are generated.
                 </p>
-                <button
-                  onClick={() => setTab("pipeline")}
-                  className="mt-4 rounded-lg border border-ink-600 px-4 py-2 font-mono text-xs text-paper-200/70 transition hover:border-amber/50 hover:text-amber"
-                >
-                  ← go to pipeline
-                </button>
               </div>
             )}
           </section>
