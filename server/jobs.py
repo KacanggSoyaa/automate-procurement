@@ -35,6 +35,7 @@ class Job:
     config: Optional[Dict] = None
     versions: List[Dict] = field(default_factory=list)
     audit: List[Dict] = field(default_factory=list)
+    owner: Optional[str] = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_dict(self) -> Dict:
@@ -52,6 +53,7 @@ class Job:
             "result": self._result_summary(),
             "versions": self.versions,
             "audit": self.audit[-100:],
+            "owner": self.owner,
             "created_at": self.created_at,
         }
 
@@ -73,6 +75,7 @@ class Job:
             config=record.get("config"),
             versions=record.get("versions", []),
             audit=record.get("audit", []),
+            owner=record.get("owner"),
             created_at=record.get("created_at", ""),
         )
 
@@ -106,10 +109,11 @@ class JobManager:
         self._pool = ThreadPoolExecutor(max_workers=max_workers)
 
     def create(self, files: List, model: Optional[str] = None, include_images: bool = True,
-               pattern: str = "*", skip_files: Optional[List[str]] = None) -> Job:
+               pattern: str = "*", skip_files: Optional[List[str]] = None,
+               owner: Optional[str] = None) -> Job:
         """Save the uploaded files, register a job and start it in the pool."""
         job_id = uuid.uuid4().hex[:12]
-        job = Job(id=job_id)
+        job = Job(id=job_id, owner=owner)
         upload_dir = UPLOAD_ROOT / job_id
         upload_dir.mkdir(parents=True, exist_ok=True)
 
@@ -388,18 +392,29 @@ class JobManager:
             self._jobs[job_id] = loaded
         return loaded
 
-    def history(self) -> List[Dict]:
-        """Return the persisted history index (newest first)."""
-        return history_store.list()
+    def owned_by(self, job_id: str, owner: Optional[str]) -> bool:
+        """Whether a job belongs to the given owner (admins pass owner=None)."""
+        if owner is None:
+            return True
+        job = self.get(job_id)
+        return job is not None and job.owner == owner
 
-    def delete(self, job_id: str) -> bool:
-        """Drop a job from memory and disk, returning whether it existed."""
+    def history(self, owner: Optional[str] = None) -> List[Dict]:
+        """Return the persisted history index (newest first), scoped to an owner."""
+        return history_store.list(owner)
+
+    def delete(self, job_id: str, owner: Optional[str] = None) -> bool:
+        """Drop a job from memory and disk, if the owner is allowed to."""
+        if not self.owned_by(job_id, owner):
+            return False
         with self._lock:
             self._jobs.pop(job_id, None)
         return history_store.delete(job_id)
 
-    def rename(self, job_id: str, title: str) -> Optional[Dict]:
+    def rename(self, job_id: str, title: str, owner: Optional[str] = None) -> Optional[Dict]:
         """Rename a saved history entry; returns the updated entry or None."""
+        if not self.owned_by(job_id, owner):
+            return None
         return history_store.rename(job_id, title)
 
 

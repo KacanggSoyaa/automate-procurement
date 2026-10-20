@@ -80,6 +80,7 @@ class HistoryStore:
             "logs": job.logs[-100:],
             "error": job.error,
             "files": job.files,
+            "owner": getattr(job, "owner", None),
             "created_at": job.created_at,
             "output_path": job.output_path,
             "config": job.config,
@@ -96,6 +97,7 @@ class HistoryStore:
         entry.update({
             "title": title,
             "subtitle": subtitle,
+            "owner": getattr(job, "owner", None),
             "line_items_count": data.get("line_items_count", len(data.get("line_items", []) or [])),
             "files_count": len(job.files),
             "version_count": len(job.versions),
@@ -117,10 +119,13 @@ class HistoryStore:
             self._write_index()
         return entry
 
-    def list(self) -> List[Dict]:
-        """Return history entries, newest first."""
+    def list(self, owner: Optional[str] = None) -> List[Dict]:
+        """Return history entries, newest first, optionally for one owner only."""
         with self._lock:
-            return list(self._index)
+            items = list(self._index)
+        if owner is None:
+            return items
+        return [e for e in items if e.get("owner") == owner]
 
     def load(self, job_id: str) -> Optional[Dict]:
         """Return a job's full persisted record, or None if unknown."""

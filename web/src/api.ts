@@ -1,4 +1,5 @@
 import type {
+  AuthUser,
   HistoryItem,
   Job,
   QuotaStatus,
@@ -9,6 +10,21 @@ import type {
 } from "./types";
 
 const BASE = "/api";
+
+/**
+ * fetch wrapper that includes cookies and turns a 401 into a typed error so the
+ * app can drop back to the login screen.
+ */
+async function request(input: string, init: RequestInit = {}): Promise<Response> {
+  const res = await fetch(input, { credentials: "include", ...init });
+  if (res.status === 401) {
+    throw new AuthError("Not authenticated");
+  }
+  return res;
+}
+
+/** Thrown when the session is missing or expired (HTTP 401). */
+export class AuthError extends Error {}
 
 /** Options that control how the backend processes an uploaded job. */
 export interface CreateJobOptions {
@@ -31,7 +47,7 @@ export async function createJob(files: File[], opts: CreateJobOptions = {}): Pro
     form.append("skip_files", opts.skipFiles.join("\n"));
   }
 
-  const res = await fetch(`${BASE}/jobs`, { method: "POST", body: form });
+  const res = await request(`${BASE}/jobs`, { method: "POST", body: form });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Upload failed (${res.status}): ${detail}`);
@@ -41,7 +57,7 @@ export async function createJob(files: File[], opts: CreateJobOptions = {}): Pro
 
 /** Fetch the latest status and results for a job by id. */
 export async function getJob(id: string): Promise<Job> {
-  const res = await fetch(`${BASE}/jobs/${id}`);
+  const res = await request(`${BASE}/jobs/${id}`);
   if (!res.ok) {
     throw new Error(`Failed to fetch job (${res.status})`);
   }
@@ -54,7 +70,7 @@ export async function addJobFiles(id: string, files: File[]): Promise<Job> {
   for (const file of files) {
     form.append("files", file, file.name);
   }
-  const res = await fetch(`${BASE}/jobs/${id}/files`, { method: "POST", body: form });
+  const res = await request(`${BASE}/jobs/${id}/files`, { method: "POST", body: form });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Failed to add files (${res.status}): ${detail}`);
@@ -75,7 +91,7 @@ export function downloadVersionUrl(id: string, version: number): string {
 /** Start supplier search for a finished job. `mode="all"` batches every product
  *  into one search; ``mode="per_item"` runs one search per line item. */
 export async function findSuppliers(id: string, mode: SupplierMode = "all"): Promise<Job> {
-  const res = await fetch(`${BASE}/jobs/${id}/suppliers?mode=${mode}`, { method: "POST" });
+  const res = await request(`${BASE}/jobs/${id}/suppliers?mode=${mode}`, { method: "POST" });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Failed to start supplier search (${res.status}): ${detail}`);
@@ -90,7 +106,7 @@ export function suppliersCsvUrl(id: string): string {
 
 /** Fetch the Google-Search grounding quota state for the header. */
 export async function getQuotaStatus(): Promise<QuotaStatus> {
-  const res = await fetch(`${BASE}/quota`);
+  const res = await request(`${BASE}/quota`);
   if (!res.ok) {
     throw new Error(`Failed to load quota status (${res.status})`);
   }
@@ -99,7 +115,7 @@ export async function getQuotaStatus(): Promise<QuotaStatus> {
 
 /** Fetch the saved history of finished ITB runs (newest first). */
 export async function listHistory(): Promise<HistoryItem[]> {
-  const res = await fetch(`${BASE}/history`);
+  const res = await request(`${BASE}/history`);
   if (!res.ok) {
     throw new Error(`Failed to load history (${res.status})`);
   }
@@ -109,7 +125,7 @@ export async function listHistory(): Promise<HistoryItem[]> {
 
 /** Delete a saved history entry and its stored workspace. */
 export async function deleteHistory(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/history/${id}`, { method: "DELETE" });
+  const res = await request(`${BASE}/history/${id}`, { method: "DELETE" });
   if (!res.ok) {
     throw new Error(`Failed to delete history entry (${res.status})`);
   }
@@ -117,7 +133,7 @@ export async function deleteHistory(id: string): Promise<void> {
 
 /** Rename a saved history entry; returns the updated entry. */
 export async function renameHistory(id: string, title: string): Promise<HistoryItem> {
-  const res = await fetch(`${BASE}/history/${id}`, {
+  const res = await request(`${BASE}/history/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
@@ -132,7 +148,7 @@ export async function renameHistory(id: string, title: string): Promise<HistoryI
 
 /** Fetch every supplier in the user-curated master list. */
 export async function listSuppliers(): Promise<SavedSupplier[]> {
-  const res = await fetch(`${BASE}/suppliers`);
+  const res = await request(`${BASE}/suppliers`);
   if (!res.ok) {
     throw new Error(`Failed to load suppliers (${res.status})`);
   }
@@ -142,7 +158,7 @@ export async function listSuppliers(): Promise<SavedSupplier[]> {
 
 /** Add one supplier to the master list. */
 export async function createSupplier(draft: SupplierDraft): Promise<SavedSupplier> {
-  const res = await fetch(`${BASE}/suppliers`, {
+  const res = await request(`${BASE}/suppliers`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(draft),
@@ -156,7 +172,7 @@ export async function createSupplier(draft: SupplierDraft): Promise<SavedSupplie
 
 /** Update one supplier in the master list. */
 export async function updateSupplier(id: string, draft: Partial<SupplierDraft>): Promise<SavedSupplier> {
-  const res = await fetch(`${BASE}/suppliers/${id}`, {
+  const res = await request(`${BASE}/suppliers/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(draft),
@@ -169,7 +185,7 @@ export async function updateSupplier(id: string, draft: Partial<SupplierDraft>):
 
 /** Remove one supplier from the master list. */
 export async function deleteSupplier(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/suppliers/${id}`, { method: "DELETE" });
+  const res = await request(`${BASE}/suppliers/${id}`, { method: "DELETE" });
   if (!res.ok) {
     throw new Error(`Failed to delete supplier (${res.status})`);
   }
@@ -177,7 +193,7 @@ export async function deleteSupplier(id: string): Promise<void> {
 
 /** Bulk-add suppliers (e.g. a run's shortlist) to the master list. */
 export async function importSuppliers(drafts: SupplierDraft[]): Promise<SupplierImportResult> {
-  const res = await fetch(`${BASE}/suppliers/import`, {
+  const res = await request(`${BASE}/suppliers/import`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ suppliers: drafts }),
@@ -186,4 +202,101 @@ export async function importSuppliers(drafts: SupplierDraft[]): Promise<Supplier
     throw new Error(`Failed to import suppliers (${res.status})`);
   }
   return (await res.json()) as SupplierImportResult;
+}
+
+/* --------------------------------------------------------------- auth */
+
+/** Sign in with a username/password; sets the session cookie on success. */
+export async function login(username: string, password: string): Promise<AuthUser> {
+  const res = await request(`${BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || `Login failed (${res.status})`);
+  }
+  const data = (await res.json()) as { user: AuthUser };
+  return data.user;
+}
+
+/** Clear the session cookie. */
+export async function logout(): Promise<void> {
+  await request(`${BASE}/auth/logout`, { method: "POST" });
+}
+
+/** Return the current user, or null when not signed in. */
+export async function getCurrentUser(): Promise<AuthUser | null> {
+  try {
+    const res = await request(`${BASE}/auth/me`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { user: AuthUser };
+    return data.user;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether any account exists yet (drives first-run hints on the login screen). */
+export async function getAuthStatus(): Promise<{ has_users: boolean }> {
+  try {
+    const res = await request(`${BASE}/auth/status`);
+    if (!res.ok) return { has_users: true };
+    return (await res.json()) as { has_users: boolean };
+  } catch {
+    return { has_users: true };
+  }
+}
+
+/** List all accounts (admin only). */
+export async function listUsers(): Promise<AuthUser[]> {
+  const res = await request(`${BASE}/users`);
+  if (!res.ok) {
+    throw new Error(`Failed to load users (${res.status})`);
+  }
+  const data = (await res.json()) as { users: AuthUser[] };
+  return data.users ?? [];
+}
+
+/** Create a new account (admin only). */
+export async function createUser(input: {
+  username: string;
+  password: string;
+  display_name?: string;
+  role?: string;
+}): Promise<AuthUser> {
+  const res = await request(`${BASE}/users`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || `Failed to create user (${res.status})`);
+  }
+  return (await res.json()) as AuthUser;
+}
+
+/** Reset a user's password (admin only). */
+export async function setUserPassword(id: string, password: string): Promise<AuthUser> {
+  const res = await request(`${BASE}/users/${id}/password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || `Failed to set password (${res.status})`);
+  }
+  return (await res.json()) as AuthUser;
+}
+
+/** Delete an account (admin only). */
+export async function deleteUser(id: string): Promise<void> {
+  const res = await request(`${BASE}/users/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || `Failed to delete user (${res.status})`);
+  }
 }

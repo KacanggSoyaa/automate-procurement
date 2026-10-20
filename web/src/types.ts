@@ -157,3 +157,12 @@ export interface HistoryItem {
   project_ref?: string | null;
   buyer?: string | null;
 }
+
+/** An authenticated account (admin-created). */
+export interface AuthUser {
+  id: string;
+  username: string;
+  display_name: string;
+  role: "admin" | "user";
+  created_at?: string;
+}

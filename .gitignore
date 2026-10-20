@@ -35,6 +35,11 @@ data/workspaces/
 data/history.json
 data/quota_state.json
 
+# Local user data + secrets (never publish)
+data/suppliers.json
+data/users.json
+data/auth_secret.key
+
 # Frontend
 web/node_modules/
 web/dist/

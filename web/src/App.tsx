@@ -1,23 +1,28 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AuthError,
   createJob,
   deleteHistory,
+  getCurrentUser,
   getJob,
   getQuotaStatus,
   listHistory,
+  logout as apiLogout,
   renameHistory,
 } from "./api";
 import AddFiles from "./components/AddFiles";
 import DropZone from "./components/DropZone";
 import HistorySidebar from "./components/HistorySidebar";
 import JobPanel from "./components/JobPanel";
+import Login from "./components/Login";
 import Results from "./components/Results";
 import RfqEmails from "./components/RfqEmails";
 import SettingsPanel, { parseSkipList } from "./components/SettingsPanel";
 import SupplierDirectory from "./components/SupplierDirectory";
 import SupplierPanel from "./components/SupplierPanel";
+import UsersAdmin from "./components/UsersAdmin";
 import VersionsAudit from "./components/VersionsAudit";
-import type { HistoryItem, Job, QuotaStatus } from "./types";
+import type { AuthUser, HistoryItem, Job, QuotaStatus } from "./types";
 
 /** Format a byte count as a short human-readable string (B / KB / MB). */
 function formatBytes(bytes: number): string {
@@ -40,7 +45,8 @@ const PROJECT_TABS = [
 
 type TabId =
   | (typeof BASE_TABS)[number]["id"]
-  | (typeof PROJECT_TABS)[number]["id"];
+  | (typeof PROJECT_TABS)[number]["id"]
+  | "users";
 
 /**
  * Root component: holds the selected files, starts a processing job and polls
@@ -48,6 +54,8 @@ type TabId =
  * history sidebar on the left.
  */
 export default function App() {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [job, setJob] = useState<Job | null>(null);
   const [pollId, setPollId] = useState<string | null>(null);
@@ -65,8 +73,12 @@ export default function App() {
   const [projectView, setProjectView] = useState(false);
 
   // Tabs shown in the navbar: the two homepage sections, plus the project-only
-  // sections when a saved project is open.
-  const tabs = projectView ? [...BASE_TABS, ...PROJECT_TABS] : [...BASE_TABS];
+  // sections when a saved project is open, plus the admin-only users section.
+  const tabs = [
+    ...BASE_TABS,
+    ...(projectView ? PROJECT_TABS : []),
+    ...(user?.role === "admin" ? ([{ id: "users", label: "users" }] as const) : []),
+  ];
 
   // Total size of the selected files, shown in the file summary bar.
   const totalSize = useMemo(() => files.reduce((sum, f) => sum + f.size, 0), [files]);
@@ -77,19 +89,35 @@ export default function App() {
     try {
       setHistory(await listHistory());
     } catch (e) {
+      if (e instanceof AuthError) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setHistoryLoading(false);
     }
   }, []);
 
-  // Load history once on mount.
+  // Resolve the current session on mount; show login until it succeeds.
   useEffect(() => {
+    let cancelled = false;
+    getCurrentUser().then((u) => {
+      if (cancelled) return;
+      setUser(u);
+      setAuthChecked(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load history once signed in.
+  useEffect(() => {
+    if (!user) return;
     loadHistory();
-  }, [loadHistory]);
+  }, [user, loadHistory]);
 
   // Refresh the Google-Search grounding quota badge every 30s (cheap, no API cost).
   useEffect(() => {
+    if (!user) return;
     let cancelled = false;
     const refresh = async () => {
       try {
@@ -105,7 +133,7 @@ export default function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [user]);
 
   // Poll the in-flight job every 1.5s until it is done or has errored. This is
   // keyed on the job id (not the displayed job) so navigating to history
@@ -223,7 +251,34 @@ export default function App() {
     setTab("pipeline");
   };
 
+  /** Sign out: clear the session cookie and reset app state. */
+  const signOut = async () => {
+    try {
+      await apiLogout();
+    } catch {
+      /* ignore — cookie may already be gone */
+    }
+    setUser(null);
+    setHistory([]);
+    setJob(null);
+    setFiles([]);
+    setProjectView(false);
+    setTab("pipeline");
+  };
+
   const done = job?.status === "done";
+
+  // Gate the whole app behind the login screen until a session is confirmed.
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-grid">
+        <p className="font-mono text-xs text-paper-200/50">checking session…</p>
+      </div>
+    );
+  }
+  if (!user) {
+    return <Login onSuccess={setUser} />;
+  }
 
   return (
     <div className="flex min-h-screen bg-grid">
@@ -293,6 +348,21 @@ export default function App() {
                     ? "not checked"
                     : quota.state}
               </a>
+              <span className="text-paper-200/25">·</span>
+              <span
+                className="hidden max-w-[160px] truncate text-paper-200/70 sm:inline"
+                title={`${user.display_name || user.username} (${user.role})`}
+              >
+                {user.display_name || user.username}
+                {user.role === "admin" && <span className="text-amber/70"> · admin</span>}
+              </span>
+              <button
+                onClick={signOut}
+                className="rounded border border-ink-700 px-2 py-0.5 transition hover:border-danger/50 hover:text-danger"
+                title="Sign out"
+              >
+                sign out
+              </button>
             </div>
           </div>
 
@@ -477,6 +547,24 @@ export default function App() {
               </div>
             )}
           </section>
+
+          {/* ── 05 · users (admin) ──────────────────────────────────────── */}
+          {user.role === "admin" && (
+            <section className={tab === "users" ? "" : "hidden"}>
+              <section className="pb-8 pt-6">
+                <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Admin — Users</p>
+                <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
+                  Manage accounts.
+                </h1>
+                <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
+                  Create accounts for your team, reset passwords, and remove users. Every account
+                  shares the same data store.
+                </p>
+              </section>
+
+              <UsersAdmin currentUser={user} onError={(msg) => setError(msg)} />
+            </section>
+          )}
 
           <footer className="mt-16 border-t border-ink-800 pt-4 font-mono text-[11px] text-paper-200/40">
             automate // procurement · local pipeline · powered by Gemini
