@@ -469,11 +469,12 @@ class SupplierManager:
         self._lock = threading.Lock()
         self._active: Dict[str, bool] = {}
 
-    def start(self, job_id: str, mode: str = "all") -> Optional[str]:
+    def start(self, job_id: str, mode: str = "all", api_key: Optional[str] = None) -> Optional[str]:
         """Begin background shortlisting; returns None on success or an error message.
 
         ``mode`` is ``"all"`` (one batched search covering every product at once)
-        or ``"per_item"`` (a separate search per product).
+        or ``"per_item"`` (a separate search per product). ``api_key`` is the
+        caller's own Gemini key when they have set one, else the server env key.
         """
         if mode not in SUPPLIER_MODES:
             mode = "all"
@@ -492,7 +493,8 @@ class SupplierManager:
 
         self._seed(job, items)
         job.data["supplier_mode"] = mode
-        threading.Thread(target=self._run, args=(job_id, mode), daemon=True).start()
+        finder = SupplierFinder(api_key=api_key) if api_key else self.finder
+        threading.Thread(target=self._run, args=(job_id, mode, finder), daemon=True).start()
         return None
 
     @staticmethod
@@ -527,7 +529,8 @@ class SupplierManager:
         self._persist(job)
         return state
 
-    def _run(self, job_id: str, mode: str = "all"):
+    def _run(self, job_id: str, mode: str = "all", finder: Optional["SupplierFinder"] = None):
+        finder = finder or self.finder
         try:
             job = job_manager.get(job_id)
             if job is None:
@@ -535,17 +538,19 @@ class SupplierManager:
             state = job.data.get("suppliers") or []
             items = (job.data or {}).get("line_items") or []
             if mode == "per_item":
-                self._run_per_item(job, state, items)
+                self._run_per_item(job, state, items, finder)
             else:
-                self._run_all(job, state, items)
+                self._run_all(job, state, items, finder)
             job_manager._audit(job, "supplier_search_completed", "Supplier shortlisting finished")
             self._persist(job)
         finally:
             with self._lock:
                 self._active.pop(job_id, None)
 
-    def _run_per_item(self, job, state: List[Dict], items: List[Dict]):
+    def _run_per_item(self, job, state: List[Dict], items: List[Dict],
+                      finder: Optional["SupplierFinder"] = None):
         """One search per product, run sequentially."""
+        finder = finder or self.finder
         pending = sum(1 for s in state if s["status"] != "done")
         job_manager._audit(
             job, "supplier_search_started", f"Searching suppliers for {pending} product(s), one by one"
@@ -557,7 +562,7 @@ class SupplierManager:
             entry["message"] = "Searching Google…"
             self._persist(job)
             try:
-                found = self.finder.find_for_item(items[idx] if idx < len(items) else {})
+                found = finder.find_for_item(items[idx] if idx < len(items) else {})
                 if isinstance(found, tuple):
                     found, backend = found
                 else:
@@ -574,8 +579,10 @@ class SupplierManager:
                 self._persist(job)
                 traceback.print_exc()
 
-    def _run_all(self, job, state: List[Dict], items: List[Dict]):
+    def _run_all(self, job, state: List[Dict], items: List[Dict],
+                 finder: Optional["SupplierFinder"] = None):
         """One shared supplier list found once and applied to every product."""
+        finder = finder or self.finder
         targets = [(i, e) for i, e in enumerate(state) if e["status"] != "done"]
         if not targets:
             return
@@ -590,7 +597,7 @@ class SupplierManager:
         # Only the products still to do are sent, but the shared list is applied
         # to each of them (and the search subject covers all line items).
         try:
-            result = self.finder.find_for_all(items)
+            result = finder.find_for_all(items)
             if isinstance(result, tuple):
                 found, backend = result
             else:

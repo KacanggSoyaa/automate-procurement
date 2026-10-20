@@ -166,3 +166,13 @@ export interface AuthUser {
   role: "admin" | "user";
   created_at?: string;
 }
+
+/** A user's AI settings (the API key is only ever returned masked). */
+export interface AiSettings {
+  has_api_key: boolean;
+  api_key_hint: string | null;
+  model: string | null;
+  env_key_available?: boolean;
+  fallback_models?: string[];
+  default_model?: string;
+}

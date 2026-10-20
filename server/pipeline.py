@@ -77,6 +77,7 @@ def run_pipeline(
     skip_files: Optional[List[str]] = None,
     progress: ProgressCb = None,
     previous: Optional[Dict] = None,
+    api_key: Optional[str] = None,
 ) -> Dict:
     """Run the full ITB -> spec sheet pipeline for a folder of uploaded files.
 
@@ -160,7 +161,7 @@ def run_pipeline(
                 source_files.append(Path(p).name)
         emit("images", 1, 1, f"Found {len(new_screens)} new image(s)")
 
-    processor = AIProcessor(model=model)
+    processor = AIProcessor(model=model, api_key=api_key)
 
     def ai_progress(kind: str, i: int, n: int):
         emit("classify", i, n, f"Classifying {kind} {i}/{n} with Gemini")

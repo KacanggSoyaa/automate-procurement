@@ -110,7 +110,7 @@ class JobManager:
 
     def create(self, files: List, model: Optional[str] = None, include_images: bool = True,
                pattern: str = "*", skip_files: Optional[List[str]] = None,
-               owner: Optional[str] = None) -> Job:
+               owner: Optional[str] = None, api_key: Optional[str] = None) -> Job:
         """Save the uploaded files, register a job and start it in the pool."""
         job_id = uuid.uuid4().hex[:12]
         job = Job(id=job_id, owner=owner)
@@ -148,12 +148,12 @@ class JobManager:
 
         self._pool.submit(
             self._run, job, str(upload_dir), str(output_path), model, include_images,
-            pattern, skip_files,
+            pattern, skip_files, api_key,
         )
         return job
 
     def _run(self, job: Job, upload_dir: str, output_path: str, model, include_images, pattern,
-             skip_files: Optional[List[str]] = None):
+             skip_files: Optional[List[str]] = None, api_key: Optional[str] = None):
         """Execute the pipeline for one job, updating state and logging errors."""
         self._update(job, status="running", stage="start", message="Starting pipeline")
         try:
@@ -164,6 +164,7 @@ class JobManager:
                 include_images=include_images,
                 pattern=pattern,
                 skip_files=skip_files,
+                api_key=api_key,
                 progress=lambda stage, cur, tot, msg: self._update(
                     job, stage=stage, current=cur, total=tot, message=msg, log=msg
                 ),
@@ -211,7 +212,8 @@ class JobManager:
             "processed": processed,
         }
 
-    def add_and_reprocess(self, job_id: str, files: List) -> Optional[Job]:
+    def add_and_reprocess(self, job_id: str, files: List,
+                          api_key: Optional[str] = None) -> Optional[Job]:
         """Append files to a finished job's folder and reprocess only the new ones."""
         job = self.get(job_id)
         if job is None:
@@ -253,10 +255,11 @@ class JobManager:
             message="Adding files…",
             log=f"{added} file(s) added — reprocessing",
         )
-        self._pool.submit(self._run_incremental, job, cfg, record)
+        self._pool.submit(self._run_incremental, job, cfg, record, api_key)
         return job
 
-    def _run_incremental(self, job: Job, cfg: Dict, record: Dict):
+    def _run_incremental(self, job: Job, cfg: Dict, record: Dict,
+                         api_key: Optional[str] = None):
         """Reprocess only new/changed files for a finished job and save results."""
         upload_dir = str(UPLOAD_ROOT / job.id)
         output_path = job.output_path or str(WORKSPACE_ROOT / job.id / "specification_sheet.docx")
@@ -270,6 +273,7 @@ class JobManager:
                 pattern=cfg.get("pattern", "*"),
                 skip_files=cfg.get("skip_files"),
                 previous=record,
+                api_key=api_key,
                 progress=lambda stage, cur, tot, msg: self._update(
                     job, stage=stage, current=cur, total=tot, message=msg, log=msg
                 ),

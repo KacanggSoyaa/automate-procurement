@@ -1,4 +1,5 @@
 import type {
+  AiSettings,
   AuthUser,
   HistoryItem,
   Job,
@@ -299,4 +300,37 @@ export async function deleteUser(id: string): Promise<void> {
     const detail = await res.text();
     throw new Error(detail || `Failed to delete user (${res.status})`);
   }
+}
+
+/* ----------------------------------------------------------- AI settings */
+
+/** Fetch the caller's AI settings (key is returned masked only). */
+export async function getAiSettings(): Promise<AiSettings> {
+  const res = await request(`${BASE}/settings/ai`);
+  if (!res.ok) {
+    throw new Error(`Failed to load settings (${res.status})`);
+  }
+  return (await res.json()) as AiSettings;
+}
+
+/** Save the caller's Gemini key and/or model; clears the key when requested. */
+export async function updateAiSettings(input: {
+  apiKey?: string;
+  clearKey?: boolean;
+  model?: string | null;
+}): Promise<AiSettings> {
+  const body: Record<string, unknown> = {};
+  if (input.apiKey !== undefined) body.api_key = input.apiKey;
+  if (input.clearKey) body.clear_key = true;
+  if (input.model !== undefined) body.model = input.model;
+  const res = await request(`${BASE}/settings/ai`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || `Failed to save settings (${res.status})`);
+  }
+  return (await res.json()) as AiSettings;
 }

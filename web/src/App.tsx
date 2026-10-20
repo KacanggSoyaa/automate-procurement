@@ -11,6 +11,7 @@ import {
   renameHistory,
 } from "./api";
 import AddFiles from "./components/AddFiles";
+import AiSettings from "./components/AiSettings";
 import DropZone from "./components/DropZone";
 import HistorySidebar from "./components/HistorySidebar";
 import JobPanel from "./components/JobPanel";
@@ -46,7 +47,7 @@ const PROJECT_TABS = [
 type TabId =
   | (typeof BASE_TABS)[number]["id"]
   | (typeof PROJECT_TABS)[number]["id"]
-  | "users";
+  | "settings";
 
 /**
  * Root component: holds the selected files, starts a processing job and polls
@@ -77,7 +78,7 @@ export default function App() {
   const tabs = [
     ...BASE_TABS,
     ...(projectView ? PROJECT_TABS : []),
-    ...(user?.role === "admin" ? ([{ id: "users", label: "users" }] as const) : []),
+    { id: "settings", label: "settings" } as const,
   ];
 
   // Total size of the selected files, shown in the file summary bar.
@@ -548,23 +549,39 @@ export default function App() {
             )}
           </section>
 
-          {/* ── 05 · users (admin) ──────────────────────────────────────── */}
-          {user.role === "admin" && (
-            <section className={tab === "users" ? "" : "hidden"}>
-              <section className="pb-8 pt-6">
-                <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Admin — Users</p>
-                <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
-                  Manage accounts.
-                </h1>
-                <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
-                  Create accounts for your team, reset passwords, and remove users. Every account
-                  shares the same data store.
-                </p>
-              </section>
-
-              <UsersAdmin currentUser={user} onError={(msg) => setError(msg)} />
+          {/* ── 05 · settings (per-user AI key + model, admin: users) ───── */}
+          <section className={tab === "settings" ? "" : "hidden"}>
+            <section className="pb-8 pt-6">
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Settings — AI</p>
+              <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
+                Your Gemini key.
+              </h1>
+              <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
+                Connect your own Google Gemini API key so your runs use your quota, and choose which
+                model reads your ITBs. The key is stored on the server for your account and never
+                shown back in full.
+              </p>
             </section>
-          )}
+
+            <AiSettings onError={(msg) => setError(msg)} />
+
+            {user.role === "admin" && (
+              <section className="mt-12">
+                <section className="pb-6 pt-6">
+                  <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Admin — Users</p>
+                  <h2 className="mt-3 font-mono text-2xl font-semibold leading-tight text-paper-50 sm:text-3xl">
+                    Manage accounts.
+                  </h2>
+                  <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
+                    Create accounts for your team, reset passwords, and remove users. This section is
+                    visible to admins only.
+                  </p>
+                </section>
+
+                <UsersAdmin currentUser={user} onError={(msg) => setError(msg)} />
+              </section>
+            )}
+          </section>
 
           <footer className="mt-16 border-t border-ink-800 pt-4 font-mono text-[11px] text-paper-200/40">
             automate // procurement · local pipeline · powered by Gemini

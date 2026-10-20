@@ -1,4 +1,5 @@
 """FastAPI backend for the Automate Procurement web UI."""
+import os
 from pathlib import Path
 from typing import List, Optional
 
@@ -51,6 +52,17 @@ class CreateUserRequest(BaseModel):
 class SetPasswordRequest(BaseModel):
     """Body for an admin resetting a user's password."""
     password: str
+
+
+class AiSettingsRequest(BaseModel):
+    """Body for updating the caller's Gemini key and/or model.
+
+    Send ``api_key`` to set (or replace) the key, ``clear_key=true`` to remove
+    it, and ``model`` to change the model. Omitted fields are left unchanged.
+    """
+    api_key: Optional[str] = None
+    clear_key: bool = False
+    model: Optional[str] = None
 
 
 class SupplierPayload(BaseModel):
@@ -208,6 +220,41 @@ def get_quota():
     return quota_status()
 
 
+@app.get("/api/settings/ai")
+def get_ai_settings(user: dict = Depends(current_user)):
+    """Return the caller's AI settings (masked key, never the raw secret)."""
+    u = user_store.get(user.get("id", "")) or {}
+    env_default = bool(os.environ.get("GEMINI_API_KEY"))
+    return {
+        "has_api_key": bool(u.get("has_api_key")),
+        "api_key_hint": u.get("api_key_hint"),
+        "model": u.get("gemini_model"),
+        "env_key_available": env_default,
+        "fallback_models": ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"],
+        "default_model": "gemini-3.8-flash",
+    }
+
+
+@app.put("/api/settings/ai")
+def update_ai_settings(body: AiSettingsRequest, user: dict = Depends(current_user)):
+    """Save or clear the caller's own Gemini key and/or model choice."""
+    if body.api_key is not None and body.api_key.strip() and len(body.api_key.strip()) < 10:
+        raise HTTPException(status_code=400, detail="That API key looks too short.")
+    entry = user_store.set_ai_settings(
+        user.get("id", ""),
+        api_key=body.api_key,
+        clear_key=body.clear_key,
+        model=body.model,
+    )
+    if entry is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {
+        "has_api_key": entry.get("has_api_key"),
+        "api_key_hint": entry.get("api_key_hint"),
+        "model": entry.get("gemini_model"),
+    }
+
+
 def _parse_skip_files(raw: Optional[str]) -> List[str]:
     """Split the settings textarea into a clean list of filenames to skip."""
     if not raw:
@@ -223,6 +270,11 @@ def _owner_scope(user: dict) -> Optional[str]:
     their own account id.
     """
     return None if user.get("role") == "admin" else user.get("id")
+
+
+def _user_api_key(user: dict) -> Optional[str]:
+    """The Gemini key to use for a request: the user's own, else the server env."""
+    return user_store.api_key(user.get("id", "")) or None
 
 
 def _owned_job(job_id: str, user: dict):
@@ -249,13 +301,15 @@ async def create_job(
     """
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
+    entry = user_store.get(user.get("id", "")) or {}
     job = job_manager.create(
         files,
-        model=model,
+        model=model or entry.get("gemini_model"),
         include_images=include_images,
         pattern=pattern,
         skip_files=_parse_skip_files(skip_files),
         owner=user.get("id"),
+        api_key=_user_api_key(user),
     )
     return job.to_dict()
 
@@ -300,7 +354,7 @@ async def add_job_files(
     _owned_job(job_id, user)
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
-    job = job_manager.add_and_reprocess(job_id, files)
+    job = job_manager.add_and_reprocess(job_id, files, api_key=_user_api_key(user))
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
     return job.to_dict()
@@ -328,7 +382,7 @@ def find_suppliers(job_id: str, mode: str = "all", user: dict = Depends(current_
     once; ``mode=per_item`` runs a separate search per line item.
     """
     _owned_job(job_id, user)
-    err = supplier_finder.start(job_id, mode)
+    err = supplier_finder.start(job_id, mode, api_key=_user_api_key(user))
     if err:
         if err == "Job not found.":
             status = 404

@@ -103,9 +103,20 @@ class UserStore:
             return False
 
     @staticmethod
+    def _mask_key(key: Optional[str]) -> Optional[str]:
+        """Return a non-reversible hint of an API key (never the full value)."""
+        if not key:
+            return None
+        tail = key[-4:] if len(key) > 4 else ""
+        return f"••••{tail}" if tail else "••••"
+
+    @staticmethod
     def _public(user: Dict) -> Dict:
-        """Strip the password hash before returning a user to callers."""
-        return {k: v for k, v in user.items() if k != "password_hash"}
+        """Strip secrets and expose only a masked hint of the stored API key."""
+        out = {k: v for k, v in user.items() if k not in ("password_hash", "gemini_api_key")}
+        out["has_api_key"] = bool(user.get("gemini_api_key"))
+        out["api_key_hint"] = UserStore._mask_key(user.get("gemini_api_key"))
+        return out
 
     def list(self) -> List[Dict]:
         with self._lock:
@@ -164,6 +175,37 @@ class UserStore:
             if user is None:
                 return None
             user["password_hash"] = self._hash(password)
+            user["updated_at"] = _now()
+            self._write()
+            return self._public(user)
+
+    def api_key(self, user_id: str) -> Optional[str]:
+        """Return the raw stored Gemini API key for a user (server-side use only)."""
+        with self._lock:
+            user = next((u for u in self._items if u.get("id") == user_id), None)
+            return (user or {}).get("gemini_api_key") or None
+
+    def set_ai_settings(self, user_id: str, api_key: Optional[str] = None,
+                        clear_key: bool = False, model: Optional[str] = None) -> Optional[Dict]:
+        """Update a user's Gemini key/model. ``clear_key`` removes the stored key.
+
+        Passing ``api_key=None`` with ``clear_key=False`` leaves the key as-is, so
+        callers can update just the model without resending the secret.
+        """
+        with self._lock:
+            user = next((u for u in self._items if u.get("id") == user_id), None)
+            if user is None:
+                return None
+            if clear_key:
+                user.pop("gemini_api_key", None)
+            elif api_key:
+                user["gemini_api_key"] = api_key.strip()
+            if model is not None:
+                m = model.strip()
+                if m:
+                    user["gemini_model"] = m
+                else:
+                    user.pop("gemini_model", None)
             user["updated_at"] = _now()
             self._write()
             return self._public(user)
