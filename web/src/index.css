@@ -33,6 +33,11 @@ body,
 body {
   margin: 0;
   background-color: var(--color-space-950);
+  background-image:
+    radial-gradient(circle at 85% -5%, rgba(232, 163, 61, 0.35), transparent 45%),
+    radial-gradient(circle at -5% 95%, rgba(94, 200, 192, 0.3), transparent 45%),
+    linear-gradient(180deg, #0a0f1e 0%, var(--color-space-950) 50%, #0a1020 100%);
+  background-attachment: fixed;
   color: var(--color-paper-50);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;

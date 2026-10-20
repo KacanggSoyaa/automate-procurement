@@ -88,7 +88,7 @@ export default function HistorySidebar({
 
       <aside
         className={[
-          "z-40 flex w-72 shrink-0 flex-col border-r border-ink-800 bg-ink-950/95",
+          "z-40 flex w-72 shrink-0 flex-col border-r border-ink-800/80 bg-ink-950/55 backdrop-blur-xl",
           "fixed inset-y-0 left-0 transition-transform duration-200",
           "md:sticky md:top-0 md:h-screen md:self-start md:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",

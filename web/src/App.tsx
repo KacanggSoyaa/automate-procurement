@@ -223,7 +223,7 @@ export default function App() {
 
       <div className="min-w-0 flex-1">
         {/* Top navbar: brand, section tabs and live quota badge. */}
-        <header className="sticky top-0 z-30 border-b border-ink-800 bg-space-950/90 backdrop-blur">
+        <header className="sticky top-0 z-30 border-b border-ink-800/80 bg-space-950/45 backdrop-blur-xl">
           <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-6 pt-3">
             <div className="flex items-center gap-3 font-mono text-sm">
               <button
