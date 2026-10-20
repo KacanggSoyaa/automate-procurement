@@ -25,6 +25,15 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Top-level sections reachable from the navbar. */
+const TABS = [
+  { id: "pipeline", label: "pipeline" },
+  { id: "suppliers", label: "supplier search" },
+  { id: "emails", label: "quotation email" },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
+
 /**
  * Root component: holds the selected files, starts a processing job and polls
  * it until it finishes, then renders the results. Past runs are listed in the
@@ -42,6 +51,7 @@ export default function App() {
   const [includeImages, setIncludeImages] = useState(true);
   const [skipFiles, setSkipFiles] = useState("");
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
+  const [tab, setTab] = useState<TabId>("pipeline");
 
   // Total size of the selected files, shown in the file summary bar.
   const totalSize = useMemo(() => files.reduce((sum, f) => sum + f.size, 0), [files]);
@@ -194,6 +204,8 @@ export default function App() {
     setSidebarOpen(false);
   };
 
+  const done = job?.status === "done";
+
   return (
     <div className="flex min-h-screen bg-grid">
       <HistorySidebar
@@ -210,8 +222,9 @@ export default function App() {
       />
 
       <div className="min-w-0 flex-1">
-        <div className="mx-auto max-w-4xl px-6 py-10">
-          <header className="flex items-center justify-between border-b border-ink-800 pb-4">
+        {/* Top navbar: brand, section tabs and live quota badge. */}
+        <header className="sticky top-0 z-30 border-b border-ink-800 bg-space-950/90 backdrop-blur">
+          <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-6 pt-3">
             <div className="flex items-center gap-3 font-mono text-sm">
               <button
                 onClick={() => setSidebarOpen(true)}
@@ -228,9 +241,11 @@ export default function App() {
               <span className="text-paper-200/70">procurement</span>
             </div>
             <div className="flex items-center gap-2 font-mono text-[11px] text-paper-200/50">
-              <span className="h-1.5 w-1.5 rounded-full bg-teal animate-pulse-dot" />
-              gemini vision pipeline
-              <span className="text-paper-200/25">·</span>
+              <span className="hidden items-center gap-1.5 sm:flex">
+                <span className="h-1.5 w-1.5 rounded-full bg-teal animate-pulse-dot" />
+                gemini vision pipeline
+                <span className="text-paper-200/25">·</span>
+              </span>
               <a
                 href={quota?.link ?? "https://ai.dev/rate-limit"}
                 target="_blank"
@@ -260,107 +275,203 @@ export default function App() {
                     : quota.state}
               </a>
             </div>
-          </header>
+          </div>
 
-          <section className="py-10">
-            <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Step 01 — 03</p>
-            <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
-              Drop an ITB folder.
-              <br />
-              Get a spec sheet.
-            </h1>
-            <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
-              Upload your Invitation To Bid documents and screenshots. Everything runs in the background —
-              PDFs, Word / Excel files and images are read, line items are separated from requirements by Gemini, and a
-              formatted RFQ specification sheet comes out the other side.
-            </p>
-          </section>
-
-          <DropZone onFiles={onFiles} disabled={running} />
-
-          {files.length > 0 && (
-            <div className="mt-5 rounded-2xl border border-ink-700 bg-ink-900/70 p-5">
-              <div className="flex items-center justify-between">
-                <p className="font-mono text-xs uppercase tracking-wide text-paper-200/50">
-                  {files.length} file{files.length === 1 ? "" : "s"} · {formatBytes(totalSize)}
-                </p>
-                <button
-                  className="font-mono text-xs text-paper-200/50 transition hover:text-danger"
-                  onClick={() => {
-                    setFiles([]);
-                    setJob(null);
-                    setError(null);
-                  }}
-                  disabled={running}
-                >
-                  clear
-                </button>
-              </div>
-
-              <ul className="mt-3 flex flex-wrap gap-2">
-                {files.map((f) => (
-                  <li
-                    key={f.name}
-                    className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 font-mono text-xs text-paper-200/80"
+          <nav className="mx-auto max-w-4xl px-6">
+            <ul className="-mb-px flex gap-6 overflow-x-auto font-mono text-xs uppercase tracking-widest">
+              {TABS.map((t) => (
+                <li key={t.id}>
+                  <button
+                    onClick={() => setTab(t.id)}
+                    className={`flex items-center gap-1.5 border-b-2 py-3 transition ${
+                      tab === t.id
+                        ? "border-amber text-amber"
+                        : "border-transparent text-paper-200/50 hover:text-paper-100"
+                    }`}
                   >
-                    <span className="max-w-[240px] truncate">{f.name}</span>
-                    <span className="text-paper-200/40">{formatBytes(f.size)}</span>
-                  </li>
-                ))}
-              </ul>
+                    {t.label}
+                    {t.id === "suppliers" && done && (job.result?.suppliers?.length ?? 0) > 0 && (
+                      <span className="rounded-full bg-ink-800 px-1.5 py-0.5 text-[10px] text-paper-200/60">
+                        {job.result?.suppliers?.length}
+                      </span>
+                    )}
+                    {t.id === "emails" && done && (job.result?.rfq_emails?.length ?? 0) > 0 && (
+                      <span className="rounded-full bg-ink-800 px-1.5 py-0.5 text-[10px] text-paper-200/60">
+                        {job.result?.rfq_emails?.length}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </header>
 
-              <SettingsPanel
-                names={files.map((f) => f.name)}
-                value={skipFiles}
-                onChange={setSkipFiles}
-                disabled={running}
-              />
-
-              <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
-                <label className="flex items-center gap-2 font-mono text-xs text-paper-200/70">
-                  <input
-                    type="checkbox"
-                    checked={includeImages}
-                    onChange={(e) => setIncludeImages(e.target.checked)}
-                    disabled={running}
-                    className="h-4 w-4 accent-[var(--color-amber)]"
-                  />
-                  read images &amp; screenshots with Gemini vision
-                </label>
-
-                <button
-                  onClick={process}
-                  disabled={running}
-                  className="rounded-lg bg-amber px-6 py-2.5 font-mono text-sm font-semibold text-space-950 transition hover:bg-amber-light disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {running ? "PROCESSING…" : "RUN PIPELINE"}
-                </button>
-              </div>
-            </div>
-          )}
-
+        <div className="mx-auto max-w-4xl px-6 py-10">
           {error && (
-            <div className="mt-5 rounded-xl border border-danger/30 bg-danger/5 p-4 font-mono text-xs text-danger">
+            <div className="mb-5 rounded-xl border border-danger/30 bg-danger/5 p-4 font-mono text-xs text-danger">
               {error}
             </div>
           )}
 
-          {job && (
-            <div className="mt-5 space-y-5">
-              <JobPanel job={job} />
-              {job.status === "done" && (
-                <AddFiles
-                  jobId={job.id}
-                  onProcessed={onFilesAdded}
-                  onError={(msg) => setError(msg)}
+          {/* ── 01 · pipeline: upload, run, results ─────────────────────── */}
+          <section className={tab === "pipeline" ? "" : "hidden"}>
+            <section className="pb-8 pt-6">
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 01 / 03 — Pipeline</p>
+              <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
+                Drop an ITB folder.
+                <br />
+                Get a spec sheet.
+              </h1>
+              <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
+                Upload your Invitation To Bid documents and screenshots. Everything runs in the background —
+                PDFs, Word / Excel files and images are read, line items are separated from requirements by Gemini, and a
+                formatted RFQ specification sheet comes out the other side.
+              </p>
+            </section>
+
+            <DropZone onFiles={onFiles} disabled={running} />
+
+            {files.length > 0 && (
+              <div className="mt-5 rounded-2xl border border-ink-700 bg-ink-900/70 p-5">
+                <div className="flex items-center justify-between">
+                  <p className="font-mono text-xs uppercase tracking-wide text-paper-200/50">
+                    {files.length} file{files.length === 1 ? "" : "s"} · {formatBytes(totalSize)}
+                  </p>
+                  <button
+                    className="font-mono text-xs text-paper-200/50 transition hover:text-danger"
+                    onClick={() => {
+                      setFiles([]);
+                      setJob(null);
+                      setError(null);
+                    }}
+                    disabled={running}
+                  >
+                    clear
+                  </button>
+                </div>
+
+                <ul className="mt-3 flex flex-wrap gap-2">
+                  {files.map((f) => (
+                    <li
+                      key={f.name}
+                      className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-800 px-3 py-1.5 font-mono text-xs text-paper-200/80"
+                    >
+                      <span className="max-w-[240px] truncate">{f.name}</span>
+                      <span className="text-paper-200/40">{formatBytes(f.size)}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                <SettingsPanel
+                  names={files.map((f) => f.name)}
+                  value={skipFiles}
+                  onChange={setSkipFiles}
+                  disabled={running}
                 />
-              )}
-              {job.status === "done" && <Results job={job} />}
-              {job.status === "done" && <SupplierPanel job={job} onError={(msg) => setError(msg)} onUpdated={setJob} />}
-              {job.status === "done" && <VersionsAudit job={job} />}
-              {job.status === "done" && <RfqEmails emails={job.result?.rfq_emails ?? []} />}
-            </div>
-          )}
+
+                <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
+                  <label className="flex items-center gap-2 font-mono text-xs text-paper-200/70">
+                    <input
+                      type="checkbox"
+                      checked={includeImages}
+                      onChange={(e) => setIncludeImages(e.target.checked)}
+                      disabled={running}
+                      className="h-4 w-4 accent-[var(--color-amber)]"
+                    />
+                    read images &amp; screenshots with Gemini vision
+                  </label>
+
+                  <button
+                    onClick={process}
+                    disabled={running}
+                    className="rounded-lg bg-amber px-6 py-2.5 font-mono text-sm font-semibold text-space-950 transition hover:bg-amber-light disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {running ? "PROCESSING…" : "RUN PIPELINE"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {job && (
+              <div className="mt-5 space-y-5">
+                <JobPanel job={job} />
+                {done && (
+                  <AddFiles jobId={job.id} onProcessed={onFilesAdded} onError={(msg) => setError(msg)} />
+                )}
+                {done && <Results job={job} />}
+                {done && <VersionsAudit job={job} />}
+                {done && (
+                  <button
+                    onClick={() => setTab("suppliers")}
+                    className="w-full rounded-xl border border-ink-700 bg-ink-900/70 px-4 py-3 font-mono text-xs text-paper-200/70 transition hover:border-amber/50 hover:text-amber"
+                  >
+                    next: find suppliers for this run →
+                  </button>
+                )}
+              </div>
+            )}
+          </section>
+
+          {/* ── 02 · supplier search ────────────────────────────────────── */}
+          <section className={tab === "suppliers" ? "" : "hidden"}>
+            <section className="pb-8 pt-6">
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 02 / 03 — Supplier Search</p>
+              <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
+                Shortlist suppliers.
+              </h1>
+              <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
+                Run a live web search per line item (or one shared list for everything) to find vendors,
+                websites and contact emails. Export the shortlist as a CSV when you are done.
+              </p>
+            </section>
+
+            {done ? (
+              <SupplierPanel job={job} onError={(msg) => setError(msg)} onUpdated={setJob} />
+            ) : (
+              <div className="rounded-2xl border border-dashed border-ink-700 bg-ink-900/40 p-8 text-center">
+                <p className="font-mono text-xs text-paper-200/50">
+                  {job ? "Run the pipeline first — supplier search unlocks when it finishes." : "No run selected yet — upload a package in the pipeline section."}
+                </p>
+                <button
+                  onClick={() => setTab("pipeline")}
+                  className="mt-4 rounded-lg border border-ink-600 px-4 py-2 font-mono text-xs text-paper-200/70 transition hover:border-amber/50 hover:text-amber"
+                >
+                  ← go to pipeline
+                </button>
+              </div>
+            )}
+          </section>
+
+          {/* ── 03 · quotation email ────────────────────────────────────── */}
+          <section className={tab === "emails" ? "" : "hidden"}>
+            <section className="pb-8 pt-6">
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 03 / 03 — Quotation Email</p>
+              <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
+                Copy-ready RFQ emails.
+              </h1>
+              <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
+                One quotation request email per line item, drafted from the extracted specs. Copy them
+                individually or grab all of them at once.
+              </p>
+            </section>
+
+            {done ? (
+              <RfqEmails emails={job.result?.rfq_emails ?? []} />
+            ) : (
+              <div className="rounded-2xl border border-dashed border-ink-700 bg-ink-900/40 p-8 text-center">
+                <p className="font-mono text-xs text-paper-200/50">
+                  {job ? "Run the pipeline first — quotation emails are generated with the results." : "No run selected yet — upload a package in the pipeline section."}
+                </p>
+                <button
+                  onClick={() => setTab("pipeline")}
+                  className="mt-4 rounded-lg border border-ink-600 px-4 py-2 font-mono text-xs text-paper-200/70 transition hover:border-amber/50 hover:text-amber"
+                >
+                  ← go to pipeline
+                </button>
+              </div>
+            )}
+          </section>
 
           <footer className="mt-16 border-t border-ink-800 pt-4 font-mono text-[11px] text-paper-200/40">
             automate // procurement · local pipeline · powered by Gemini
