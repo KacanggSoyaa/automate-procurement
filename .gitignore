@@ -34,6 +34,7 @@ data/uploads/
 data/workspaces/
 data/history.json
 data/quota_state.json
+data/suppliers.json
 
 # Frontend
 web/node_modules/
