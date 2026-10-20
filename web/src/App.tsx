@@ -14,6 +14,7 @@ import JobPanel from "./components/JobPanel";
 import Results from "./components/Results";
 import RfqEmails from "./components/RfqEmails";
 import SettingsPanel, { parseSkipList } from "./components/SettingsPanel";
+import SupplierDirectory from "./components/SupplierDirectory";
 import SupplierPanel from "./components/SupplierPanel";
 import VersionsAudit from "./components/VersionsAudit";
 import type { HistoryItem, Job, QuotaStatus } from "./types";
@@ -29,6 +30,7 @@ function formatBytes(bytes: number): string {
 const TABS = [
   { id: "pipeline", label: "pipeline" },
   { id: "suppliers", label: "supplier search" },
+  { id: "directory", label: "supplier list" },
   { id: "emails", label: "quotation email" },
 ] as const;
 
@@ -317,7 +319,7 @@ export default function App() {
           {/* ── 01 · pipeline: upload, run, results ─────────────────────── */}
           <section className={tab === "pipeline" ? "" : "hidden"}>
             <section className="pb-8 pt-6">
-              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 01 / 03 — Pipeline</p>
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 01 / 04 — Pipeline</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
                 Drop an ITB folder.
                 <br />
@@ -416,7 +418,7 @@ export default function App() {
           {/* ── 02 · supplier search ────────────────────────────────────── */}
           <section className={tab === "suppliers" ? "" : "hidden"}>
             <section className="pb-8 pt-6">
-              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 02 / 03 — Supplier Search</p>
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 02 / 04 — Supplier Search</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
                 Shortlist suppliers.
               </h1>
@@ -443,10 +445,26 @@ export default function App() {
             )}
           </section>
 
-          {/* ── 03 · quotation email ────────────────────────────────────── */}
+          {/* ── 03 · supplier list (master directory) ───────────────────── */}
+          <section className={tab === "directory" ? "" : "hidden"}>
+            <section className="pb-8 pt-6">
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 03 / 04 — Supplier List</p>
+              <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
+                Your supplier directory.
+              </h1>
+              <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
+                Add suppliers by hand or import a run's shortlist. This master list is saved on the
+                server and stays available for every future ITB, no matter which run you have open.
+              </p>
+            </section>
+
+            <SupplierDirectory job={job} onError={(msg) => setError(msg)} />
+          </section>
+
+          {/* ── 04 · quotation email ────────────────────────────────────── */}
           <section className={tab === "emails" ? "" : "hidden"}>
             <section className="pb-8 pt-6">
-              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 03 / 03 — Quotation Email</p>
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 04 / 04 — Quotation Email</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
                 Copy-ready RFQ emails.
               </h1>

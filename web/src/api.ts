@@ -1,4 +1,12 @@
-import type { HistoryItem, Job, QuotaStatus, SupplierMode } from "./types";
+import type {
+  HistoryItem,
+  Job,
+  QuotaStatus,
+  SavedSupplier,
+  SupplierDraft,
+  SupplierImportResult,
+  SupplierMode,
+} from "./types";
 
 const BASE = "/api";
 
@@ -118,4 +126,64 @@ export async function renameHistory(id: string, title: string): Promise<HistoryI
     throw new Error(`Failed to rename history entry (${res.status})`);
   }
   return (await res.json()) as HistoryItem;
+}
+
+/* ---------------------------------------------------------- supplier list */
+
+/** Fetch every supplier in the user-curated master list. */
+export async function listSuppliers(): Promise<SavedSupplier[]> {
+  const res = await fetch(`${BASE}/suppliers`);
+  if (!res.ok) {
+    throw new Error(`Failed to load suppliers (${res.status})`);
+  }
+  const data = (await res.json()) as { suppliers: SavedSupplier[] };
+  return data.suppliers ?? [];
+}
+
+/** Add one supplier to the master list. */
+export async function createSupplier(draft: SupplierDraft): Promise<SavedSupplier> {
+  const res = await fetch(`${BASE}/suppliers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to add supplier (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as SavedSupplier;
+}
+
+/** Update one supplier in the master list. */
+export async function updateSupplier(id: string, draft: Partial<SupplierDraft>): Promise<SavedSupplier> {
+  const res = await fetch(`${BASE}/suppliers/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to update supplier (${res.status})`);
+  }
+  return (await res.json()) as SavedSupplier;
+}
+
+/** Remove one supplier from the master list. */
+export async function deleteSupplier(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/suppliers/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    throw new Error(`Failed to delete supplier (${res.status})`);
+  }
+}
+
+/** Bulk-add suppliers (e.g. a run's shortlist) to the master list. */
+export async function importSuppliers(drafts: SupplierDraft[]): Promise<SupplierImportResult> {
+  const res = await fetch(`${BASE}/suppliers/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ suppliers: drafts }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to import suppliers (${res.status})`);
+  }
+  return (await res.json()) as SupplierImportResult;
 }

@@ -43,6 +43,33 @@ export interface ProductSuppliers {
 /** How supplier search is run: one batched search for all items, or per item. */
 export type SupplierMode = "all" | "per_item";
 
+/** A supplier saved in the user-curated master list (independent of any run). */
+export interface SavedSupplier {
+  id: string;
+  company_name: string;
+  website: string;
+  email: string;
+  contact: string;
+  source: string;
+  notes: string;
+  tags: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Fields a user can set/edit for a curated supplier. */
+export type SupplierDraft = Pick<
+  SavedSupplier,
+  "company_name" | "website" | "email" | "contact" | "source" | "notes" | "tags"
+>;
+
+/** Result of bulk-importing suppliers into the master list. */
+export interface SupplierImportResult {
+  added: number;
+  skipped: number;
+  total: number;
+}
+
 /** Google-Search grounding quota state shown in the header. */
 export interface QuotaStatus {
   state: "ok" | "exhausted" | "unknown";

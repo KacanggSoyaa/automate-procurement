@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { findSuppliers, getJob, suppliersCsvUrl } from "../api";
+import { createSupplier, findSuppliers, getJob, suppliersCsvUrl } from "../api";
 import type { Job, ProductSuppliers, SupplierMode } from "../types";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -35,6 +35,7 @@ export default function SupplierPanel({
   const seeded = job.result?.suppliers ?? [];
   const [rows, setRows] = useState<ProductSuppliers[]>(seeded);
   const [active, setActive] = useState(false);
+  const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
   const timer = useRef<number | null>(null);
   // Once this panel has started (or polled) a search, it owns `rows`; only seed
   // from the prop on first mount / when switching to a different job.
@@ -98,8 +99,29 @@ export default function SupplierPanel({
   const foundTotal = rows.reduce((sum, r) => sum + (r.suppliers?.length ?? 0), 0);
   const doneCount = rows.filter((r) => r.status === "done").length;
 
-  const onStart = async (mode: SupplierMode) => {
-    touched.current = true;
+  /** Save one found supplier into the persistent master list. */
+  const saveToDirectory = async (
+    key: string,
+    supplier: ProductSuppliers["suppliers"][number],
+    itemName?: string | null,
+  ) => {
+    try {
+      await createSupplier({
+        company_name: supplier.company_name ?? "",
+        website: supplier.website ?? "",
+        email: supplier.email ?? "",
+        contact: supplier.contact ?? "",
+        source: supplier.source ?? "",
+        notes: itemName ? `found for ${itemName}` : "",
+        tags: "",
+      });
+      setSavedKeys((prev) => new Set(prev).add(key));
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const onStart = async (mode: SupplierMode) => {    touched.current = true;
     setActive(true);
     try {
       const updated = await findSuppliers(job.id, mode);
@@ -256,6 +278,19 @@ export default function SupplierPanel({
                         source ›
                       </a>
                     )}
+                    <button
+                      onClick={() => saveToDirectory(`${i}:${j}`, s, row.item_name)}
+                      disabled={savedKeys.has(`${i}:${j}`)}
+                      title="Save this supplier to your master list"
+                      className={[
+                        "shrink-0 rounded border px-2 py-0.5 font-mono text-[10px] transition",
+                        savedKeys.has(`${i}:${j}`)
+                          ? "border-teal/40 text-teal"
+                          : "border-ink-600 text-paper-200/50 hover:border-amber/50 hover:text-amber",
+                      ].join(" ")}
+                    >
+                      {savedKeys.has(`${i}:${j}`) ? "saved ✓" : "+ list"}
+                    </button>
                   </li>
                 ))}
               </ul>

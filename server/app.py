@@ -15,12 +15,29 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from .jobs import job_manager
+from .supplier_store import supplier_store
 from .suppliers import quota_status, supplier_finder
 
 
 class RenameRequest(BaseModel):
     """Body for renaming a saved history entry."""
     title: str
+
+
+class SupplierPayload(BaseModel):
+    """User-editable fields of a curated supplier directory entry."""
+    company_name: Optional[str] = ""
+    website: Optional[str] = ""
+    email: Optional[str] = ""
+    contact: Optional[str] = ""
+    source: Optional[str] = ""
+    notes: Optional[str] = ""
+    tags: Optional[str] = ""
+
+
+class SupplierImportRequest(BaseModel):
+    """Bulk-add a list of suppliers (e.g. one run's shortlist) to the directory."""
+    suppliers: List[SupplierPayload] = []
 
 app = FastAPI(title="Automate Procurement API", version="0.1.0")
 
@@ -189,3 +206,42 @@ def download(job_id: str):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename="specification_sheet.docx",
     )
+
+
+# --------------------------------------------------------------- supplier list
+@app.get("/api/suppliers")
+def list_suppliers():
+    """Return every supplier the buyer has curated into the master list."""
+    return {"suppliers": supplier_store.list()}
+
+
+@app.post("/api/suppliers")
+def create_supplier(body: SupplierPayload):
+    """Add one supplier to the master list."""
+    entry = supplier_store.add(body.model_dump())
+    if entry is None:
+        raise HTTPException(status_code=400, detail="A supplier needs a name or website.")
+    return entry
+
+
+@app.post("/api/suppliers/import")
+def import_suppliers(body: SupplierImportRequest):
+    """Bulk-add suppliers (skips duplicates) and report the counts."""
+    return supplier_store.add_many([s.model_dump() for s in body.suppliers])
+
+
+@app.patch("/api/suppliers/{supplier_id}")
+def update_supplier(supplier_id: str, body: SupplierPayload):
+    """Update one curated supplier's fields."""
+    entry = supplier_store.update(supplier_id, body.model_dump(exclude_unset=True))
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Supplier not found.")
+    return entry
+
+
+@app.delete("/api/suppliers/{supplier_id}")
+def delete_supplier(supplier_id: str):
+    """Remove one supplier from the master list."""
+    if not supplier_store.delete(supplier_id):
+        raise HTTPException(status_code=404, detail="Supplier not found.")
+    return {"ok": True, "id": supplier_id}
