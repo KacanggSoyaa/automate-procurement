@@ -6,7 +6,7 @@ import {
   listSuppliers,
   updateSupplier,
 } from "../api";
-import type { Job, SavedSupplier, SupplierDraft } from "../types";
+import type { AuthUser, Job, SavedSupplier, SupplierDraft, SupplierScope } from "../types";
 
 /** Blank draft used by the "add supplier" form. */
 const EMPTY_DRAFT: SupplierDraft = {
@@ -51,13 +51,16 @@ function matches(supplier: SavedSupplier, query: string): boolean {
  */
 export default function SupplierDirectory({
   job,
+  user,
   onError,
 }: {
   job: Job | null;
+  user: AuthUser | null;
   onError: (msg: string) => void;
 }) {
   const [items, setItems] = useState<SavedSupplier[]>([]);
   const [loading, setLoading] = useState(true);
+  const [scope, setScope] = useState<SupplierScope>("mine");
   const [draft, setDraft] = useState<SupplierDraft>(EMPTY_DRAFT);
   const [adding, setAdding] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -67,9 +70,10 @@ export default function SupplierDirectory({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = async (which: SupplierScope = scope) => {
+    setLoading(true);
     try {
-      setItems(await listSuppliers());
+      setItems(await listSuppliers(which));
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -78,9 +82,12 @@ export default function SupplierDirectory({
   };
 
   useEffect(() => {
-    load();
+    load(scope);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [scope]);
+
+  /** Whether the current user may edit/delete a supplier entry. */
+  const canEdit = (s: SavedSupplier) => !s.owner || s.owner === user?.id;
 
   const filtered = useMemo(
     () => items.filter((s) => matches(s, query.trim().toLowerCase())),
@@ -190,10 +197,35 @@ export default function SupplierDirectory({
         <div>
           <p className="font-mono text-xs uppercase tracking-wide text-paper-200/50">Master supplier list</p>
           <p className="mt-1 font-mono text-[11px] text-paper-200/40">
-            {items.length} supplier{items.length === 1 ? "" : "s"} saved · reusable across every ITB
+            {items.length} supplier{items.length === 1 ? "" : "s"} shown ·{" "}
+            {scope === "mine" ? "your list" : "every user's list"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex overflow-hidden rounded-lg border border-ink-600">
+            <button
+              onClick={() => setScope("mine")}
+              title="Show only your own suppliers"
+              className={`px-3 py-2 font-mono text-xs transition ${
+                scope === "mine"
+                  ? "bg-amber text-space-950"
+                  : "text-paper-200/60 hover:text-paper-50"
+              }`}
+            >
+              my list
+            </button>
+            <button
+              onClick={() => setScope("all")}
+              title="Show suppliers saved by every user"
+              className={`border-l border-ink-600 px-3 py-2 font-mono text-xs transition ${
+                scope === "all"
+                  ? "bg-amber text-space-950"
+                  : "text-paper-200/60 hover:text-paper-50"
+              }`}
+            >
+              all users
+            </button>
+          </div>
           {job?.result?.suppliers?.some((r) => (r.suppliers?.length ?? 0) > 0) && (
             <button
               onClick={importFromRun}
@@ -212,6 +244,13 @@ export default function SupplierDirectory({
           </button>
         </div>
       </div>
+
+      {scope === "all" && (
+        <p className="mt-3 rounded-lg border border-ink-700 bg-ink-800/40 p-2.5 font-mono text-[11px] text-paper-200/50">
+          Viewing suppliers from every user. Entries owned by someone else are read-only —
+          switch to <span className="text-paper-100">my list</span> to edit your own.
+        </p>
+      )}
 
       {notice && (
         <p className="mt-3 rounded-lg border border-teal/30 bg-teal/5 p-2.5 font-mono text-[11px] text-teal">
@@ -371,19 +410,30 @@ export default function SupplierDirectory({
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      onClick={() => startEdit(s)}
-                      className="rounded border border-ink-600 px-3 py-1 font-mono text-[11px] text-paper-200/60 transition hover:border-amber/50 hover:text-amber"
-                    >
-                      edit
-                    </button>
-                    <button
-                      onClick={() => remove(s.id)}
-                      disabled={busyId === s.id}
-                      className="rounded border border-ink-600 px-3 py-1 font-mono text-[11px] text-paper-200/60 transition hover:border-danger/50 hover:text-danger disabled:opacity-50"
-                    >
-                      delete
-                    </button>
+                    {canEdit(s) ? (
+                      <>
+                        <button
+                          onClick={() => startEdit(s)}
+                          className="rounded border border-ink-600 px-3 py-1 font-mono text-[11px] text-paper-200/60 transition hover:border-amber/50 hover:text-amber"
+                        >
+                          edit
+                        </button>
+                        <button
+                          onClick={() => remove(s.id)}
+                          disabled={busyId === s.id}
+                          className="rounded border border-ink-600 px-3 py-1 font-mono text-[11px] text-paper-200/60 transition hover:border-danger/50 hover:text-danger disabled:opacity-50"
+                        >
+                          delete
+                        </button>
+                      </>
+                    ) : (
+                      <span
+                        title="Saved by another user — read only"
+                        className="rounded border border-ink-600 px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-paper-200/40"
+                      >
+                        other user
+                      </span>
+                    )}
                   </div>
                 </div>
               )}

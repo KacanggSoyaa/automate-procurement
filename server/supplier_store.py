@@ -65,21 +65,38 @@ class SupplierStore:
         item.setdefault("tags", "")
         return item
 
-    def list(self) -> List[Dict]:
-        """Return all curated suppliers (newest first)."""
+    def list(self, owner: Optional[str] = None, scope: str = "mine") -> List[Dict]:
+        """Return curated suppliers (newest first), filtered by ownership.
+
+        ``scope="mine"`` returns the caller's own suppliers plus any shared
+        entries that have no owner (legacy rows). ``scope="all"`` returns every
+        supplier regardless of owner. Entries carry an ``owner`` field so the UI
+        can mark which ones belong to someone else.
+        """
         with self._lock:
-            return list(self._items)
+            items = list(self._items)
+        if scope == "all":
+            return items
+        return [s for s in items if not s.get("owner") or s.get("owner") == owner]
 
     def get(self, supplier_id: str) -> Optional[Dict]:
         with self._lock:
             return next((s for s in self._items if s.get("id") == supplier_id), None)
 
-    def add(self, payload: Dict) -> Optional[Dict]:
+    @staticmethod
+    def _can_write(entry: Optional[Dict], owner: Optional[str]) -> bool:
+        """A supplier is writable by its owner, or by anyone when unowned/shared."""
+        if entry is None:
+            return False
+        return not entry.get("owner") or entry.get("owner") == owner
+
+    def add(self, payload: Dict, owner: Optional[str] = None) -> Optional[Dict]:
         """Add one supplier. Returns the entry, or None if it has no name/website."""
         item = self._normalise(payload)
         if not item["company_name"] and not item["website"]:
             return None
         item["id"] = uuid.uuid4().hex[:12]
+        item["owner"] = owner or ""
         item["created_at"] = _now()
         item["updated_at"] = item["created_at"]
         with self._lock:
@@ -87,7 +104,7 @@ class SupplierStore:
             self._write()
         return item
 
-    def add_many(self, payloads: List[Dict]) -> Dict:
+    def add_many(self, payloads: List[Dict], owner: Optional[str] = None) -> Dict:
         """Bulk-add suppliers (e.g. a whole run shortlist); skips blanks/dupes.
 
         A supplier is considered a duplicate when its (case-insensitive) website
@@ -108,6 +125,7 @@ class SupplierStore:
                     skipped += 1
                     continue
                 item["id"] = uuid.uuid4().hex[:12]
+                item["owner"] = owner or ""
                 item["created_at"] = _now()
                 item["updated_at"] = item["created_at"]
                 self._items.insert(0, item)
@@ -127,11 +145,15 @@ class SupplierStore:
         name = " ".join(_clean(item.get("company_name")).lower().split())
         return name
 
-    def update(self, supplier_id: str, payload: Dict) -> Optional[Dict]:
-        """Patch one supplier's fields. Returns the updated entry or None."""
+    def update(self, supplier_id: str, payload: Dict, owner: Optional[str] = None) -> Optional[Dict]:
+        """Patch one supplier's fields. Returns the updated entry or None.
+
+        Shared (unowned) entries and the caller's own entries are editable;
+        another user's entry is left untouched (returns None).
+        """
         with self._lock:
             idx = next((i for i, s in enumerate(self._items) if s.get("id") == supplier_id), None)
-            if idx is None:
+            if idx is None or not self._can_write(self._items[idx], owner):
                 return None
             updated = self._normalise(payload, base=self._items[idx])
             updated["updated_at"] = _now()
@@ -139,8 +161,12 @@ class SupplierStore:
             self._write()
             return updated
 
-    def delete(self, supplier_id: str) -> bool:
+    def delete(self, supplier_id: str, owner: Optional[str] = None) -> bool:
+        """Remove a supplier the caller may write. Returns whether it was removed."""
         with self._lock:
+            entry = next((s for s in self._items if s.get("id") == supplier_id), None)
+            if not self._can_write(entry, owner):
+                return False
             before = len(self._items)
             self._items = [s for s in self._items if s.get("id") != supplier_id]
             removed = len(self._items) != before

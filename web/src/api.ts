@@ -8,6 +8,7 @@ import type {
   SupplierDraft,
   SupplierImportResult,
   SupplierMode,
+  SupplierScope,
 } from "./types";
 
 const BASE = "/api";
@@ -147,9 +148,10 @@ export async function renameHistory(id: string, title: string): Promise<HistoryI
 
 /* ---------------------------------------------------------- supplier list */
 
-/** Fetch every supplier in the user-curated master list. */
-export async function listSuppliers(): Promise<SavedSupplier[]> {
-  const res = await request(`${BASE}/suppliers`);
+/** Fetch suppliers in the master list. `scope="mine"` (default) is your own
+ *  list (plus shared entries); `scope="all"` returns every user's suppliers. */
+export async function listSuppliers(scope: SupplierScope = "mine"): Promise<SavedSupplier[]> {
+  const res = await request(`${BASE}/suppliers?scope=${scope}`);
   if (!res.ok) {
     throw new Error(`Failed to load suppliers (${res.status})`);
   }

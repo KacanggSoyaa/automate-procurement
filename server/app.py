@@ -423,38 +423,42 @@ def download(job_id: str, user: dict = Depends(current_user)):
 
 # --------------------------------------------------------------- supplier list
 @app.get("/api/suppliers")
-def list_suppliers():
-    """Return every supplier the buyer has curated into the master list."""
-    return {"suppliers": supplier_store.list()}
+def list_suppliers(scope: str = "mine", user: dict = Depends(current_user)):
+    """Return curated suppliers. ``scope=mine`` (default) is your own list (plus
+    shared entries); ``scope=all`` shows every user's suppliers, marked with an
+    ``owner`` so the UI can lock the ones you do not own.
+    """
+    scope = "all" if scope == "all" else "mine"
+    return {"suppliers": supplier_store.list(owner=user.get("id"), scope=scope)}
 
 
 @app.post("/api/suppliers")
-def create_supplier(body: SupplierPayload):
-    """Add one supplier to the master list."""
-    entry = supplier_store.add(body.model_dump())
+def create_supplier(body: SupplierPayload, user: dict = Depends(current_user)):
+    """Add one supplier to your master list."""
+    entry = supplier_store.add(body.model_dump(), owner=user.get("id"))
     if entry is None:
         raise HTTPException(status_code=400, detail="A supplier needs a name or website.")
     return entry
 
 
 @app.post("/api/suppliers/import")
-def import_suppliers(body: SupplierImportRequest):
+def import_suppliers(body: SupplierImportRequest, user: dict = Depends(current_user)):
     """Bulk-add suppliers (skips duplicates) and report the counts."""
-    return supplier_store.add_many([s.model_dump() for s in body.suppliers])
+    return supplier_store.add_many([s.model_dump() for s in body.suppliers], owner=user.get("id"))
 
 
 @app.patch("/api/suppliers/{supplier_id}")
-def update_supplier(supplier_id: str, body: SupplierPayload):
-    """Update one curated supplier's fields."""
-    entry = supplier_store.update(supplier_id, body.model_dump(exclude_unset=True))
+def update_supplier(supplier_id: str, body: SupplierPayload, user: dict = Depends(current_user)):
+    """Update one curated supplier's fields (only if you own it)."""
+    entry = supplier_store.update(supplier_id, body.model_dump(exclude_unset=True), owner=user.get("id"))
     if entry is None:
         raise HTTPException(status_code=404, detail="Supplier not found.")
     return entry
 
 
 @app.delete("/api/suppliers/{supplier_id}")
-def delete_supplier(supplier_id: str):
-    """Remove one supplier from the master list."""
-    if not supplier_store.delete(supplier_id):
+def delete_supplier(supplier_id: str, user: dict = Depends(current_user)):
+    """Remove one supplier from the master list (only if you own it)."""
+    if not supplier_store.delete(supplier_id, owner=user.get("id")):
         raise HTTPException(status_code=404, detail="Supplier not found.")
     return {"ok": True, "id": supplier_id}

@@ -43,6 +43,9 @@ export interface ProductSuppliers {
 /** How supplier search is run: one batched search for all items, or per item. */
 export type SupplierMode = "all" | "per_item";
 
+/** Which set of curated suppliers to view: just yours, or everyone's. */
+export type SupplierScope = "mine" | "all";
+
 /** A supplier saved in the user-curated master list (independent of any run). */
 export interface SavedSupplier {
   id: string;
@@ -53,6 +56,7 @@ export interface SavedSupplier {
   source: string;
   notes: string;
   tags: string;
+  owner?: string;
   created_at: string;
   updated_at: string;
 }

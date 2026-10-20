@@ -498,7 +498,7 @@ export default function App() {
               </p>
             </section>
 
-            <SupplierDirectory job={job} onError={(msg) => setError(msg)} />
+            <SupplierDirectory job={job} user={user} onError={(msg) => setError(msg)} />
           </section>
 
           {/* ── 03 · supplier search (project) ──────────────────────────── */}
