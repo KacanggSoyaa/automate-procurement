@@ -104,6 +104,8 @@ export default function App() {
     );
   }, [user, activeProvider]);
   const needsSetup = !!user && missingProviders.length > 0;
+  // Reading saved suppliers needs no AI key; only AI work (jobs/search) does.
+  const canBrowseWithoutKey = tab === "directory" || tab === "suppliers";
 
   /** Reload the saved-run history from the backend. */
   const loadHistory = useCallback(async () => {
@@ -421,7 +423,7 @@ export default function App() {
           )}
 
           {/* ── setup wall: blocks the app until a personal AI key exists ── */}
-          {needsSetup && tab !== "settings" && (
+          {needsSetup && !canBrowseWithoutKey && tab !== "settings" && (
             <section className="rounded-2xl border border-amber/30 bg-amber/5 p-6">
               <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">
                 Setup required
@@ -538,7 +540,7 @@ export default function App() {
           </section>
 
           {/* ── 02 · supplier list (master directory) ───────────────────── */}
-          <section className={tab === "directory" && !needsSetup ? "" : "hidden"}>
+          <section className={tab === "directory" ? "" : "hidden"}>
             <section className="pb-8 pt-6">
               <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 02 / 02 — Supplier List</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
@@ -554,7 +556,7 @@ export default function App() {
           </section>
 
           {/* ── 03 · supplier search (project) ──────────────────────────── */}
-          <section className={tab === "suppliers" && !needsSetup ? "" : "hidden"}>
+          <section className={tab === "suppliers" ? "" : "hidden"}>
             <section className="pb-8 pt-6">
               <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Project — Supplier Search</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
@@ -567,7 +569,21 @@ export default function App() {
             </section>
 
             {done ? (
-              <SupplierPanel job={job} onError={(msg) => setError(msg)} onUpdated={setJob} />
+              <div className="space-y-4">
+                {needsSetup && (
+                  <div className="rounded-xl border border-amber/30 bg-amber/5 p-4 font-mono text-xs text-amber/80">
+                    You can review this project's suppliers now. Add your API key in{" "}
+                    <button
+                      onClick={() => setTab("settings")}
+                      className="underline decoration-amber/40 underline-offset-2 hover:text-amber"
+                    >
+                      settings
+                    </button>{" "}
+                    to run new searches.
+                  </div>
+                )}
+                <SupplierPanel job={job} onError={(msg) => setError(msg)} onUpdated={setJob} />
+              </div>
             ) : (
               <div className="rounded-2xl border border-dashed border-ink-700 bg-ink-900/40 p-8 text-center">
                 <p className="font-mono text-xs text-paper-200/50">
