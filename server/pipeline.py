@@ -19,6 +19,7 @@ from extractors.office_extractor import OfficeExtractor  # noqa: E402
 from processors.ai_processor import AIProcessor  # noqa: E402
 from generators.enhanced_spec_sheet import EnhancedSpecSheetGenerator  # noqa: E402
 from generators.rfq_email_generator import RFQEmailGenerator  # noqa: E402
+from server.ai_providers import provider_label  # noqa: E402
 
 ProgressCb = Optional[Callable[[str, int, int, str], None]]
 
@@ -78,17 +79,18 @@ def run_pipeline(
     progress: ProgressCb = None,
     previous: Optional[Dict] = None,
     api_key: Optional[str] = None,
+    provider: Optional[str] = None,
 ) -> Dict:
     """Run the full ITB -> spec sheet pipeline for a folder of uploaded files.
 
     Every matching PDF, Word (.docx) and Excel (.xlsx/.xlsm) file is read by
     default. ``skip_files`` lets the caller exclude specific documents by exact
     filename (case-insensitive); skipped files are still listed in the source
-    footer as evidence but are never sent to Gemini for classification.
+    footer as evidence but are never sent to the AI provider for classification.
 
     Pass ``previous`` (a persisted job record with ``data`` and ``config``) to
-    reprocess incrementally: only files added or changed since then are sent to
-    Gemini, and their results are merged into the stored ones.
+    reprocess incrementally: only files added or changed since then are
+    classified, and their results are merged into the stored ones.
     """
     prev_record = previous or {}
     prev_data = prev_record.get("data") or {}
@@ -161,10 +163,11 @@ def run_pipeline(
                 source_files.append(Path(p).name)
         emit("images", 1, 1, f"Found {len(new_screens)} new image(s)")
 
-    processor = AIProcessor(model=model, api_key=api_key)
+    processor = AIProcessor(provider=provider, model=model, api_key=api_key)
+    label = provider_label(processor.provider)
 
     def ai_progress(kind: str, i: int, n: int):
-        emit("classify", i, n, f"Classifying {kind} {i}/{n} with Gemini")
+        emit("classify", i, n, f"Classifying {kind} {i}/{n} with {label}")
 
     reqs = processor.classify(content, image_paths=image_paths, progress=ai_progress)
 

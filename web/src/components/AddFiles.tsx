@@ -60,7 +60,7 @@ export default function AddFiles({ jobId, onProcessed, onError }: Props) {
 
       <p className="mt-2 font-sans text-xs leading-relaxed text-paper-200/50">
         Upload extra documents or screenshots for this run. Only the <span className="text-paper-200/80">new files</span>{" "}
-        are reprocessed by Gemini — existing line items and requirements are kept, and the
+        are reprocessed by your AI provider — existing line items and requirements are kept, and the
         specification sheet + RFQ email are rebuilt from the combined set.
       </p>
 

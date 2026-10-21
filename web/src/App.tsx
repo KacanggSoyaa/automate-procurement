@@ -318,7 +318,7 @@ export default function App() {
             <div className="flex items-center gap-2 font-mono text-[11px] text-paper-200/50">
               <span className="hidden items-center gap-1.5 sm:flex">
                 <span className="h-1.5 w-1.5 rounded-full bg-teal animate-pulse-dot" />
-                gemini vision pipeline
+                ai vision pipeline
                 <span className="text-paper-200/25">·</span>
               </span>
               <a
@@ -329,7 +329,7 @@ export default function App() {
                   quota?.detail ??
                   (quota?.state === "unknown"
                     ? "Quota not checked yet — run a supplier search"
-                    : "Google-Search grounding quota (last check)")
+                    : "Gemini grounding quota (last check)")
                 }
                 className="flex items-center gap-1.5 transition hover:text-paper-100"
               >
@@ -405,7 +405,7 @@ export default function App() {
               </h1>
               <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
                 Upload your Invitation To Bid documents and screenshots. Everything runs in the background —
-                PDFs, Word / Excel files and images are read, line items are separated from requirements by Gemini, and a
+                PDFs, Word / Excel files and images are read, line items are separated from requirements by your AI provider, and a
                 formatted RFQ specification sheet comes out the other side.
               </p>
             </section>
@@ -459,7 +459,7 @@ export default function App() {
                       disabled={running}
                       className="h-4 w-4 accent-[var(--color-amber)]"
                     />
-                    read images &amp; screenshots with Gemini vision
+                    read images &amp; screenshots with AI vision
                   </label>
 
                   <button
@@ -549,17 +549,17 @@ export default function App() {
             )}
           </section>
 
-          {/* ── 05 · settings (per-user AI key + model, admin: users) ───── */}
+          {/* ── 05 · settings (per-user AI provider/key/model, admin: users) ── */}
           <section className={tab === "settings" ? "" : "hidden"}>
             <section className="pb-8 pt-6">
               <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Settings — AI</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
-                Your Gemini key.
+                Your AI, your choice.
               </h1>
               <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
-                Connect your own Google Gemini API key so your runs use your quota, and choose which
-                model reads your ITBs. The key is stored on the server for your account and never
-                shown back in full.
+                Connect your own Gemini, OpenAI or Anthropic API key so your runs use your quota,
+                and choose which provider and model reads your ITBs. Keys are stored on the server
+                for your account and never shown back in full.
               </p>
             </section>
 
@@ -584,7 +584,7 @@ export default function App() {
           </section>
 
           <footer className="mt-16 border-t border-ink-800 pt-4 font-mono text-[11px] text-paper-200/40">
-            automate // procurement · local pipeline · powered by Gemini
+            automate // procurement · local pipeline · powered by Gemini, OpenAI & Anthropic
           </footer>
         </div>
       </div>

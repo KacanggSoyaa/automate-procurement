@@ -16,6 +16,7 @@ except ImportError:
 from extractors.pdf_extractor import PDFExtractor
 from extractors.office_extractor import OfficeExtractor
 from processors.ai_processor import AIProcessor
+from server.ai_providers import provider_label
 from generators.enhanced_spec_sheet import EnhancedSpecSheetGenerator
 from generators.rfq_dispatcher import RFQDispatcher
 
@@ -37,9 +38,11 @@ def cli():
 @click.option('--pattern', default='*ITB*', help='Filename glob of source PDFs (default: *ITB*)')
 @click.option('--images', default=None, help='Comma-separated image globs to include (default: png/jpg/jpeg/webp/bmp)')
 @click.option('--no-images', is_flag=True, help='Do not send images to Gemini')
-@click.option('--model', default=None, help='Gemini model (default: gemini-3.8-flash)')
+@click.option('--model', default=None, help='AI model (default: provider default)')
+@click.option('--provider', default=None, type=click.Choice(['gemini', 'openai', 'anthropic'], case_sensitive=False),
+              help='AI provider (default: AI_PROVIDER env or gemini)')
 @click.option('--skip', default='', help='Comma-separated exact filenames to exclude from extraction')
-def extract(itb_dir, output, pattern, images, no_images, model, skip):
+def extract(itb_dir, output, pattern, images, no_images, model, provider, skip):
     """Steps 1 & 2: extract ITB content and generate the spec sheet."""
     click.echo('Step 1: ITB Review & Line Item Extraction...')
     pdf_ext = PDFExtractor()
@@ -71,13 +74,13 @@ def extract(itb_dir, output, pattern, images, no_images, model, skip):
         image_paths += images_found
         source_files += [Path(p).name for p in images_found]
         if image_paths:
-            click.echo(f'  - {len(image_paths)} image(s) will be sent to Gemini')
+            click.echo(f'  - {len(image_paths)} image(s) will be sent to the AI provider')
 
-    click.echo('Classifying content with Gemini (separating line items from requirements)...')
     try:
-        processor = AIProcessor(model=model)
+        processor = AIProcessor(provider=provider, model=model)
     except RuntimeError as e:
         raise click.ClickException(str(e))
+    click.echo(f'Classifying content with {provider_label(processor.provider)} (separating line items from requirements)...')
     reqs = processor.classify(
         all_content,
         image_paths=image_paths,
@@ -153,7 +156,7 @@ def analyze(itb_dir, pattern):
 def run_all():
     """Run extraction and vendor setup back-to-back as one workflow."""
     extract.callback(itb_dir='./data/itb', output='./outputs/specification_sheet.docx',
-                     pattern='*ITB*', images=None, no_images=False, model=None, skip='')
+                     pattern='*ITB*', images=None, no_images=False, model=None, provider=None, skip='')
     setup_vendors.callback()
     click.echo(click.style('\nWorkflow complete!', fg='green'))
 

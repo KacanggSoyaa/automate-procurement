@@ -1,10 +1,12 @@
-"""Google-Search-grounded supplier shortlisting for the products in a job.
+"""Live web-search-grounded supplier shortlisting for the products in a job.
 
-For every line item (product) a live, grounding-enabled Gemini query returns
-REAL companies that supply it — with their website, any contact / email that
-is visible in the search snippets, and the search-result URL each entry came
-from. Results are stored on the job's data payload and persisted with its
-history record, so they survive restarts and appear in the audit trail.
+For every line item (product) a live, search-enabled AI query (Google Gemini
+grounding, OpenAI web search or Anthropic web search — whichever provider the
+user selected) returns REAL companies that supply it — with their website,
+any contact / email that is visible in the search snippets, and the
+search-result URL each entry came from. Results are stored on the job's data
+payload and persisted with its history record, so they survive restarts and
+appear in the audit trail.
 
 The model is told never to invent companies, websites or emails. Any contact
 detail that comes from a snippet is unverified by design and is flagged in
@@ -25,6 +27,15 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel
 
 from server import netfix  # noqa: F401  (IPv4-first DNS for outbound HTTPS)
+from server.ai_providers import (
+    ProviderClient,
+    UnsupportedSearchError,
+    extract_json,
+    get_spec,
+    is_quota_error,
+    is_unsupported_search,
+    resolve_model,
+)
 from server.history import history_store
 from server.jobs import job_manager
 from server.websearch import WebSearchUnavailable, search_many
@@ -77,16 +88,9 @@ def quota_status() -> Dict:
 
 _load_grounding_state()
 
-try:
-    from google import genai
-    from google.genai import types
-except ImportError:
-    genai = None
-    types = None
-
 
 class QuotaExhaustedError(RuntimeError):
-    """Google-Search-grounding daily quota is exhausted; use the web fallback."""
+    """The provider's live-search quota is exhausted; use the web fallback."""
 
 
 class Supplier(BaseModel):
@@ -104,7 +108,7 @@ class SupplierList(BaseModel):
 
 
 SEARCH_INSTRUCTION = (
-    "You are a sourcing analyst using live Google Search to build a supplier "
+    "You are a sourcing analyst using live web search to build a supplier "
     "shortlist. For the product below, find at least {target} REAL, distinct "
     "companies that manufacture, distribute or supply it. Base EVERY entry on "
     "actual search results. Never invent a company, website, phone number or "
@@ -124,7 +128,7 @@ SEARCH_INSTRUCTION = (
 )
 
 FOLLOW_UP_INSTRUCTION = (
-    "You are still using live Google Search. I already have these suppliers: "
+    "You are still using live web search. I already have these suppliers: "
     "{names}. Find {needed} ADDITIONAL real, distinct companies that supply "
     "this product but are NOT in that list. Base every entry on actual search "
     "results; never invent data.\n"
@@ -133,7 +137,7 @@ FOLLOW_UP_INSTRUCTION = (
 )
 
 SHARED_INSTRUCTION = (
-    "You are a sourcing analyst using live Google Search. Find ONE shared "
+    "You are a sourcing analyst using live web search. Find ONE shared "
     "supplier shortlist of at least {target} REAL, distinct companies that can "
     "supply the products listed below. This SAME list will be reused for ALL of "
     "the products, so prefer manufacturers, distributors or wholesalers that "
@@ -192,103 +196,91 @@ WEB_CAST_INSTRUCTION = (
 
 
 class SupplierFinder:
-    """Calls Gemini with Google-Search grounding and parses a structured list."""
+    """Runs live search-enabled supplier queries on the chosen AI provider.
 
-    DEFAULT_MODEL = "gemini-3.8-flash"
-    FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"]
+    The provider's own web-search tool is used (Gemini Google-Search grounding,
+    OpenAI web search, Anthropic web search). When the live search quota is
+    exhausted or the provider has no search tool, callers fall back to the
+    quota-free DuckDuckGo search + plain model parsing.
+    """
 
-    def __init__(self, model: str = None, api_key: str = None):
-        if genai is None:
-            raise RuntimeError(
-                "google-genai is not installed. Run: pip install google-genai"
-            )
-        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
-        self.model = model or os.environ.get("GEMINI_MODEL", self.DEFAULT_MODEL)
-        self.models = [self.model] + [m for m in self.FALLBACK_MODELS if m != self.model]
-        self.timeout_ms = int(os.environ.get("GEMINI_TIMEOUT_MS", "30000"))
-        self._client = None
+    DEFAULT_MODEL = get_spec("gemini").default_model
+    FALLBACK_MODELS = list(get_spec("gemini").fallback_models)
 
-    def _get_client(self):
+    def __init__(self, provider: str = None, model: str = None, api_key: str = None):
+        spec = get_spec(provider)
+        self.provider = spec.id
+        self.label = spec.label
+        self.api_key = api_key
+        self.model = resolve_model(spec.id, model)
+        self.models = [self.model] + [m for m in spec.fallback_models if m != self.model]
+        self.timeout_ms = int(
+            os.environ.get(f"{spec.env_prefix}_TIMEOUT_MS", str(spec.search_timeout_ms))
+        )
+        self._client: Optional[ProviderClient] = None
+
+    def _get_client(self) -> ProviderClient:
         if self._client is None:
-            key = self.api_key or os.environ.get("GEMINI_API_KEY")
-            if not key:
-                raise RuntimeError(
-                    "GEMINI_API_KEY is not set. Get a key from "
-                    "https://aistudio.google.com/apikey and set it as an "
-                    "environment variable."
-                )
-            # An explicit timeout stops an overloaded model from hanging the run
-            # forever; a slow/queued call then fails fast and we move on.
-            self._client = genai.Client(
-                api_key=key, http_options=types.HttpOptions(timeout=self.timeout_ms)
+            self._client = ProviderClient(
+                self.provider, api_key=self.api_key, model=self.model,
+                timeout_ms=self.timeout_ms,
             )
         return self._client
 
     def _call(self, instruction: str) -> List[Supplier]:
-        """One grounded request, trying each model and retrying transient errors."""
+        """One live-search request, trying each model and retrying transient errors.
+
+        Daily-quota errors skip straight to the next model without backoff;
+        once every model is exhausted the caller falls back to normal web search.
+        """
         client = self._get_client()
-        config = types.GenerateContentConfig(
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-            response_mime_type="application/json",
-            response_schema=SupplierList,
-            temperature=0.1,
-        )
         last_err = None
         saw_quota = False
+        saw_unsupported = False
         for model in self.models:
             for attempt in range(3):
                 try:
-                    resp = client.models.generate_content(
-                        model=model, contents=instruction, config=config
+                    text = client.search_json(
+                        instruction, schema=SupplierList, temperature=0.1, model=model
                     )
                     _note_grounding(True, model)
-                    return SupplierList.model_validate_json(resp.text).suppliers
+                    return extract_json(text, SupplierList).suppliers
                 except Exception as e:
                     last_err = e
                     msg = str(e)
-                    # Daily quota is gone; record it and move to the next model
-                    # without burning backoff sleeps.
-                    daily_quota = "PerDay" in msg or "current quota" in msg or "quota" in msg.lower()
-                    if daily_quota:
+                    if isinstance(e, UnsupportedSearchError) or is_unsupported_search(msg):
+                        saw_unsupported = True
+                        break
+                    if is_quota_error(msg):
                         saw_quota = True
                         _note_grounding(False, model, msg.splitlines()[0][:200])
-                    # Grounding/search unsupported for this model -> try the next one.
-                    unsupported = any(
-                        key in msg
-                        for key in (
-                            "search tool", "grounding", "not supported",
-                            "not allowed", "unsupported", "disabled", "not enabled",
-                        )
-                    )
-                    if unsupported or daily_quota:
                         break
                     if attempt < 2:
                         time.sleep(2 ** attempt + random.uniform(0, 1))
         if saw_quota:
             raise QuotaExhaustedError(
-                f"Google-Search grounding quota exhausted (429) on: {', '.join(self.models)}"
+                f"Live-search quota exhausted on {self.label}: {', '.join(self.models)}"
+            )
+        if saw_unsupported:
+            raise UnsupportedSearchError(
+                f"{self.label} live web search is not available on: {', '.join(self.models)}"
             )
         raise RuntimeError(f"Supplier search failed on all models: {last_err}")
 
     def _cast_suppliers(self, text: str) -> List[Supplier]:
-        """Plain (non-grounded) Gemini call that parses web-search text into a list.
+        """Plain (non-searched) call that parses web-search text into a list.
 
         One attempt per model so an overloaded model can't stall the whole run:
         the client timeout turns a hang into a fast failure and we try the next.
         """
         client = self._get_client()
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=SupplierList,
-            temperature=0.1,
-        )
         last_err = None
         for model in self.models:
             try:
-                resp = client.models.generate_content(
-                    model=model, contents=text, config=config
+                out = client.generate_json(
+                    [text], schema=SupplierList, system=None, temperature=0.1, model=model
                 )
-                return SupplierList.model_validate_json(resp.text).suppliers
+                return extract_json(out, SupplierList).suppliers
             except Exception as e:
                 last_err = e
         raise RuntimeError(f"Supplier list parsing failed on all models: {last_err}")
@@ -308,9 +300,10 @@ class SupplierFinder:
     def find_for_item(self, item: Dict):
         """Return ``(shortlist_dicts, backend)`` for one line item (10+, deduped).
 
-        ``backend`` is ``"search_grounding"`` when Gemini's Google-Search grounding
-        worked, or ``"web_search"`` when the daily grounding quota was exhausted
-        and the normal (quota-free) web-search fallback was used instead.
+        ``backend`` is ``"search_grounding"`` when the provider's live web
+        search worked, or ``"web_search"`` when the live-search quota was
+        exhausted (or unsupported) and the normal (quota-free) web-search
+        fallback was used instead.
         """
         name = (
             (item.get("item_name") or item.get("description") or item.get("item_number") or "product")
@@ -335,7 +328,7 @@ class SupplierFinder:
                     )
                 )
                 suppliers = self._dedupe(suppliers + extra)
-        except QuotaExhaustedError:
+        except (QuotaExhaustedError, UnsupportedSearchError):
             suppliers, backend = self._find_via_web(name, description)
         return self._to_dicts(suppliers), backend
 
@@ -353,17 +346,17 @@ class SupplierFinder:
         return queries
 
     def _find_via_web(self, name: str, description: str):
-        """Quota-free fallback: normal web search + plain Gemini parsing."""
+        """Quota-free fallback: normal web search + plain model parsing."""
         try:
             results = search_many(self._web_queries(name, description), per_query=8, max_total=40)
         except WebSearchUnavailable as e:
             raise RuntimeError(
-                "Google-Search grounding quota is exhausted and no normal web-search "
+                "Live AI search is unavailable and no normal web-search "
                 f"fallback is available: {e}"
             ) from e
         if not results:
             raise RuntimeError(
-                "Google-Search grounding quota is exhausted and the normal web-search "
+                "Live AI search is unavailable and the normal web-search "
                 "fallback returned no results for this product."
             )
         blob = "\n".join(
@@ -401,9 +394,10 @@ class SupplierFinder:
     def find_for_all(self, items: List[Dict]):
         """Return ``(shortlist_dicts, backend)``: ONE shared list for every item.
 
-        A single grounded search builds one supplier shortlist from all the
-        products together; that SAME list is then used for every line item. On a
-        grounding-quota ``429`` it falls back to the quota-free web search.
+        A single live search builds one supplier shortlist from all the
+        products together; that SAME list is then used for every line item.
+        On a live-search quota error (or missing search tool) it falls back to
+        the quota-free web search.
         """
         names = [self._item_name(it) for it in items if self._item_name(it)]
         listing = "\n".join(f"- {n}" for n in names) or "- the products in this tender"
@@ -423,7 +417,7 @@ class SupplierFinder:
                     + f"\nDo not repeat these already known suppliers: {known}"
                 )
                 suppliers = self._dedupe(suppliers + extra)
-        except QuotaExhaustedError:
+        except (QuotaExhaustedError, UnsupportedSearchError):
             suppliers, backend = self._find_shared_via_web(names)
         return self._to_dicts(self._dedupe(suppliers)), backend
 
@@ -441,12 +435,12 @@ class SupplierFinder:
             results = search_many(queries, per_query=6, max_total=60)
         except WebSearchUnavailable as e:
             raise RuntimeError(
-                "Google-Search grounding quota is exhausted and no normal web-search "
+                "Live AI search is unavailable and no normal web-search "
                 f"fallback is available: {e}"
             ) from e
         if not results:
             raise RuntimeError(
-                "Google-Search grounding quota is exhausted and the normal web-search "
+                "Live AI search is unavailable and the normal web-search "
                 "fallback returned no results for these products."
             )
         blob = "\n".join(
@@ -469,12 +463,16 @@ class SupplierManager:
         self._lock = threading.Lock()
         self._active: Dict[str, bool] = {}
 
-    def start(self, job_id: str, mode: str = "all", api_key: Optional[str] = None) -> Optional[str]:
+    def start(self, job_id: str, mode: str = "all", api_key: Optional[str] = None,
+              provider: Optional[str] = None, model: Optional[str] = None) -> Optional[str]:
         """Begin background shortlisting; returns None on success or an error message.
 
         ``mode`` is ``"all"`` (one batched search covering every product at once)
-        or ``"per_item"`` (a separate search per product). ``api_key`` is the
-        caller's own Gemini key when they have set one, else the server env key.
+        or ``"per_item"`` (a separate search per product). ``provider``/``model``
+        pick the AI provider used for the live search — the user's chosen one,
+        or Gemini when the supplier-search setting is pinned to Gemini.
+        ``api_key`` is the caller's own key for that provider when they have
+        set one, else the server env key.
         """
         if mode not in SUPPLIER_MODES:
             mode = "all"
@@ -486,6 +484,10 @@ class SupplierManager:
         items = job.data.get("line_items") or []
         if not items:
             return "This run has no line items to source."
+        try:
+            finder = SupplierFinder(provider=provider, model=model, api_key=api_key)
+        except Exception as e:
+            return str(e)
         with self._lock:
             if self._active.get(job_id):
                 return "Supplier search is already running."
@@ -493,7 +495,6 @@ class SupplierManager:
 
         self._seed(job, items)
         job.data["supplier_mode"] = mode
-        finder = SupplierFinder(api_key=api_key) if api_key else self.finder
         threading.Thread(target=self._run, args=(job_id, mode, finder), daemon=True).start()
         return None
 
@@ -503,7 +504,7 @@ class SupplierManager:
         entry["backend"] = backend or entry.get("backend") or "search_grounding"
         entry["suppliers"] = found
         entry["status"] = "done"
-        used = "web search" if entry["backend"] == "web_search" else "Google grounding"
+        used = "web search" if entry["backend"] == "web_search" else "live AI search"
         entry["message"] = f"{len(found)} supplier(s) shortlisted via {used}"
 
     def _seed(self, job, items: List[Dict]) -> List[Dict]:
@@ -559,7 +560,7 @@ class SupplierManager:
             if entry["status"] == "done":
                 continue
             entry["status"] = "searching"
-            entry["message"] = "Searching Google…"
+            entry["message"] = "Searching the web…"
             self._persist(job)
             try:
                 found = finder.find_for_item(items[idx] if idx < len(items) else {})

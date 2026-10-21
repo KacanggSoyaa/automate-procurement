@@ -1,7 +1,8 @@
-"""Gemini-based classification of ITB text and images.
+"""Multi-provider classification of ITB text and images.
 
 Separates genuine purchasable line items from general requirements and caches
-results on disk so repeat runs do not spend extra API quota.
+results on disk so repeat runs do not spend extra API quota. Works with
+Gemini, OpenAI or Anthropic — the provider is chosen per user in Settings.
 """
 import os
 import json
@@ -20,13 +21,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from server import netfix  # noqa: F401,E402  (applies IPv4-first DNS at import)
-
-try:
-    from google import genai
-    from google.genai import types
-except ImportError:
-    genai = None
-    types = None
+from server.ai_providers import (  # noqa: E402
+    ImagePart,
+    ProviderClient,
+    get_spec,
+    is_quota_error,
+    is_transient_error,
+)
 
 # A real quantity must start with a digit (e.g. "1.000", "5 Units"); phrases
 # like "ESTIMATED QTY FOR 3 YEARS" are not valid quantities.
@@ -120,30 +121,24 @@ IMAGE_INSTRUCTION = (
 
 
 class AIProcessor:
-    """Classifies ITB text and images with Gemini, with model fallback + cache."""
+    """Classifies ITB text and images with the chosen provider, cache + fallback."""
 
-    DEFAULT_MODEL = "gemini-3.8-flash"
-    FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"]
+    DEFAULT_MODEL = get_spec("gemini").default_model
+    FALLBACK_MODELS = list(get_spec("gemini").fallback_models)
     MAX_CHARS_PER_CHUNK = 120000
     MAX_IMAGES = 12
-    CACHE_VERSION = "v4"
+    CACHE_VERSION = "v5"
     CACHE_DIR = Path("./data/.ai_cache")
 
-    def __init__(self, model: str = None, api_key: str = None, use_cache: bool = True):
-        """Create the Gemini client and resolve the model/cache settings."""
-        if genai is None:
-            raise RuntimeError(
-                "google-genai is not installed. Run: pip install google-genai"
-            )
-        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
-        if not self.api_key:
-            raise RuntimeError(
-                "GEMINI_API_KEY is not set. Get a key from https://aistudio.google.com/apikey "
-                "and set it as an environment variable."
-            )
-        self.client = genai.Client(api_key=self.api_key)
-        self.model = model or os.environ.get("GEMINI_MODEL", self.DEFAULT_MODEL)
-        self.models = [self.model] + [m for m in self.FALLBACK_MODELS if m != self.model]
+    def __init__(self, provider: str = None, model: str = None, api_key: str = None,
+                 use_cache: bool = True):
+        """Create the provider client and resolve the model/cache settings."""
+        self.provider = get_spec(provider).id
+        self.client = ProviderClient(self.provider, api_key=api_key, model=model)
+        self.api_key = self.client.api_key  # raises early with a clear message when no key exists
+        self.model = self.client.model
+        spec = get_spec(self.provider)
+        self.models = [self.model] + [m for m in spec.fallback_models if m != self.model]
         self.use_cache = use_cache
         if self.use_cache:
             self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -164,24 +159,18 @@ class AIProcessor:
         return chunks
 
     def _cache_path(self, seed: str, model: str) -> Path:
-        """Return the on-disk cache path for a seed text and model."""
+        """Return the on-disk cache path for a seed text, provider and model."""
         key = hashlib.sha256(
-            (self.CACHE_VERSION + "\x00" + model + "\x00" + seed).encode("utf-8")
+            (self.CACHE_VERSION + "\x00" + self.provider + "\x00" + model + "\x00" + seed).encode("utf-8")
         ).hexdigest()
         return self.CACHE_DIR / f"{key}.json"
 
     def _generate(self, contents, cache_seed: str, retries: int = 6) -> Classification:
-        """Call Gemini, trying each fallback model, retrying transient errors.
+        """Call the provider, trying each fallback model, retrying transient errors.
 
         Daily-quota errors skip straight to the next model instead of backing
         off, since a per-day limit will not clear during this run.
         """
-        config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            response_mime_type="application/json",
-            response_schema=Classification,
-            temperature=0,
-        )
         last_err = None
         for model in self.models:
             cache_path = self._cache_path(cache_seed, model)
@@ -194,44 +183,32 @@ class AIProcessor:
                     pass
             for attempt in range(retries):
                 try:
-                    resp = self.client.models.generate_content(
+                    text = self.client.generate_json(
+                        contents,
+                        schema=Classification,
+                        system=SYSTEM_INSTRUCTION,
+                        temperature=0,
                         model=model,
-                        contents=contents,
-                        config=config,
                     )
                     if self.use_cache:
-                        cache_path.write_text(resp.text, encoding="utf-8")
-                    return Classification.model_validate_json(resp.text)
+                        cache_path.write_text(text, encoding="utf-8")
+                    return Classification.model_validate_json(text)
                 except Exception as e:
                     last_err = e
                     msg = str(e)
-                    daily_quota = "PerDay" in msg or "current quota" in msg
-                    transient = any(c in msg for c in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "overloaded"))
-                    if not transient or daily_quota:
+                    if is_quota_error(msg):
+                        break
+                    if not is_transient_error(msg):
                         break
                     delay = min(60, 2 ** attempt) + random.uniform(0, 1)
                     time.sleep(delay)
-        raise RuntimeError(f"Gemini classification failed on all models: {last_err}")
+        raise RuntimeError(
+            f"{self.provider} classification failed on all models: {last_err}"
+        )
 
     def _image_part(self, path: str):
-        """Read an image file into a Gemini content part with the right MIME type."""
-        data = Path(path).read_bytes()
-        lower = path.lower()
-        if lower.endswith('.png'):
-            mime = 'image/png'
-        elif lower.endswith(('.jpg', '.jpeg')):
-            mime = 'image/jpeg'
-        elif lower.endswith('.webp'):
-            mime = 'image/webp'
-        elif lower.endswith(('.tif', '.tiff')):
-            mime = 'image/tiff'
-        elif lower.endswith('.bmp'):
-            mime = 'image/bmp'
-        elif lower.endswith('.gif'):
-            mime = 'image/gif'
-        else:
-            mime = 'image/png'
-        return types.Part.from_bytes(data=data, mime_type=mime)
+        """Read an image file into a provider-agnostic image part."""
+        return ImagePart(path)
 
     def _classify_images(self, image_paths: List[str], progress=None) -> Classification:
         """Classify up to MAX_IMAGES screenshots/pages as a single request."""

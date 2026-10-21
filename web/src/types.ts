@@ -171,11 +171,28 @@ export interface AuthUser {
   created_at?: string;
 }
 
-/** A user's AI settings (the API key is only ever returned masked). */
+/** One supported AI provider as exposed by the settings API. */
+export interface AiProviderInfo {
+  id: string;
+  label: string;
+  default_model: string;
+  models: string[];
+  key_url?: string;
+  env_key?: string;
+  env_key_available?: boolean;
+  has_api_key?: boolean;
+  api_key_hint?: string | null;
+  model?: string | null;
+}
+
+/** A user's AI settings (keys are only ever returned masked). */
 export interface AiSettings {
-  has_api_key: boolean;
-  api_key_hint: string | null;
-  model: string | null;
+  provider: string;
+  supplier_search_provider: boolean;
+  providers: AiProviderInfo[];
+  has_api_key?: boolean;
+  api_key_hint?: string | null;
+  model?: string | null;
   env_key_available?: boolean;
   fallback_models?: string[];
   default_model?: string;

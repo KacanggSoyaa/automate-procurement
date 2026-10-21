@@ -315,13 +315,17 @@ export async function getAiSettings(): Promise<AiSettings> {
   return (await res.json()) as AiSettings;
 }
 
-/** Save the caller's Gemini key and/or model; clears the key when requested. */
+/** Save the caller's AI provider/key/model; clears the key when requested. */
 export async function updateAiSettings(input: {
+  provider?: string;
+  supplierSearchProvider?: boolean;
   apiKey?: string;
   clearKey?: boolean;
   model?: string | null;
 }): Promise<AiSettings> {
   const body: Record<string, unknown> = {};
+  if (input.provider !== undefined) body.provider = input.provider;
+  if (input.supplierSearchProvider !== undefined) body.supplier_search_provider = input.supplierSearchProvider;
   if (input.apiKey !== undefined) body.api_key = input.apiKey;
   if (input.clearKey) body.clear_key = true;
   if (input.model !== undefined) body.model = input.model;

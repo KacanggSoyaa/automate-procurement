@@ -197,7 +197,7 @@ export default function SupplierPanel({
 
       {allFailed && (
         <p className="mt-4 rounded-lg border border-danger/30 bg-danger/5 p-3 font-mono text-xs text-danger">
-          No suppliers were found — every product failed. If the Gemini grounding quota is exhausted the
+          No suppliers were found — every product failed. If the live AI search quota is exhausted the
           app now falls back to normal web search automatically, so a total failure usually means that
           fallback (DuckDuckGo / Google Custom Search) was also unavailable. Each product card below shows
           the exact error.
@@ -222,7 +222,7 @@ export default function SupplierPanel({
               {row.backend === "web_search" && (
                 <span
                   className="rounded-full border border-amber/30 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-amber/80"
-                  title="Gemini grounding quota was exhausted; found via normal web search"
+                  title="Live AI search was unavailable; found via normal web search"
                 >
                   web search
                 </span>

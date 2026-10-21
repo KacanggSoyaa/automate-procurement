@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
+from .ai_providers import PROVIDERS, get_spec
 from .auth import (
     COOKIE_NAME,
     SESSION_DAYS,
@@ -55,11 +56,16 @@ class SetPasswordRequest(BaseModel):
 
 
 class AiSettingsRequest(BaseModel):
-    """Body for updating the caller's Gemini key and/or model.
+    """Body for updating the caller's AI provider / key / model.
 
-    Send ``api_key`` to set (or replace) the key, ``clear_key=true`` to remove
-    it, and ``model`` to change the model. Omitted fields are left unchanged.
+    Send ``provider`` to switch the active provider, ``api_key`` to set (or
+    replace) that provider's key, ``clear_key=true`` to remove it, ``model``
+    to change that provider's model, and ``supplier_search_provider`` to
+    choose whether supplier search also uses the active provider. Omitted
+    fields are left unchanged.
     """
+    provider: Optional[str] = None
+    supplier_search_provider: Optional[bool] = None
     api_key: Optional[str] = None
     clear_key: bool = False
     model: Optional[str] = None
@@ -220,39 +226,73 @@ def get_quota():
     return quota_status()
 
 
+def _ai_settings_payload(user_id: str) -> dict:
+    """Full AI-settings payload: active provider, per-provider keys/models."""
+    u = user_store.get(user_id) or {}
+    keys = u.get("keys") or {}
+    active = get_spec(u.get("ai_provider")).id
+    providers = []
+    for pid, spec in PROVIDERS.items():
+        info = keys.get(pid) or {}
+        providers.append(
+            {
+                "id": pid,
+                "label": spec.label,
+                "default_model": spec.default_model,
+                "models": list(spec.models),
+                "key_url": spec.key_url,
+                "env_key": spec.env_key,
+                "env_key_available": bool(os.environ.get(spec.env_key)),
+                "has_api_key": bool(info.get("has_api_key")),
+                "api_key_hint": info.get("api_key_hint"),
+                "model": u.get(f"{pid}_model"),
+            }
+        )
+    gemini = next(p for p in providers if p["id"] == "gemini")
+    return {
+        "provider": active,
+        "supplier_search_provider": u.get("supplier_search_provider", True),
+        "providers": providers,
+        # Legacy Gemini-only fields kept for older clients.
+        "has_api_key": gemini["has_api_key"],
+        "api_key_hint": gemini["api_key_hint"],
+        "model": gemini["model"],
+        "env_key_available": gemini["env_key_available"],
+        "default_model": gemini["default_model"],
+        "fallback_models": list(get_spec("gemini").fallback_models),
+    }
+
+
 @app.get("/api/settings/ai")
 def get_ai_settings(user: dict = Depends(current_user)):
-    """Return the caller's AI settings (masked key, never the raw secret)."""
-    u = user_store.get(user.get("id", "")) or {}
-    env_default = bool(os.environ.get("GEMINI_API_KEY"))
-    return {
-        "has_api_key": bool(u.get("has_api_key")),
-        "api_key_hint": u.get("api_key_hint"),
-        "model": u.get("gemini_model"),
-        "env_key_available": env_default,
-        "fallback_models": ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"],
-        "default_model": "gemini-3.8-flash",
-    }
+    """Return the caller's AI settings (masked keys, never raw secrets)."""
+    return _ai_settings_payload(user.get("id", ""))
 
 
 @app.put("/api/settings/ai")
 def update_ai_settings(body: AiSettingsRequest, user: dict = Depends(current_user)):
-    """Save or clear the caller's own Gemini key and/or model choice."""
+    """Save or clear the caller's AI provider, keys and/or model choices."""
+    if body.provider is not None:
+        try:
+            get_spec(body.provider)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     if body.api_key is not None and body.api_key.strip() and len(body.api_key.strip()) < 10:
         raise HTTPException(status_code=400, detail="That API key looks too short.")
-    entry = user_store.set_ai_settings(
-        user.get("id", ""),
-        api_key=body.api_key,
-        clear_key=body.clear_key,
-        model=body.model,
-    )
+    try:
+        entry = user_store.set_ai_settings(
+            user.get("id", ""),
+            provider=body.provider,
+            supplier_search_provider=body.supplier_search_provider,
+            api_key=body.api_key,
+            clear_key=body.clear_key,
+            model=body.model,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if entry is None:
         raise HTTPException(status_code=404, detail="User not found.")
-    return {
-        "has_api_key": entry.get("has_api_key"),
-        "api_key_hint": entry.get("api_key_hint"),
-        "model": entry.get("gemini_model"),
-    }
+    return _ai_settings_payload(user.get("id", ""))
 
 
 def _parse_skip_files(raw: Optional[str]) -> List[str]:
@@ -272,9 +312,14 @@ def _owner_scope(user: dict) -> Optional[str]:
     return None if user.get("role") == "admin" else user.get("id")
 
 
-def _user_api_key(user: dict) -> Optional[str]:
-    """The Gemini key to use for a request: the user's own, else the server env."""
-    return user_store.api_key(user.get("id", "")) or None
+def _user_api_key(user: dict, provider: str = "gemini") -> Optional[str]:
+    """The key to use for a request: the user's own for this provider, else env."""
+    return user_store.api_key(user.get("id", ""), provider) or None
+
+
+def _user_settings(user: dict) -> dict:
+    """The caller's stored AI settings record (empty dict when unknown)."""
+    return user_store.get(user.get("id", "")) or {}
 
 
 def _owned_job(job_id: str, user: dict):
@@ -301,15 +346,17 @@ async def create_job(
     """
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
-    entry = user_store.get(user.get("id", "")) or {}
+    entry = _user_settings(user)
+    provider = get_spec(entry.get("ai_provider")).id
     job = job_manager.create(
         files,
-        model=model or entry.get("gemini_model"),
+        model=model or entry.get(f"{provider}_model"),
         include_images=include_images,
         pattern=pattern,
         skip_files=_parse_skip_files(skip_files),
         owner=user.get("id"),
-        api_key=_user_api_key(user),
+        api_key=_user_api_key(user, provider),
+        provider=provider,
     )
     return job.to_dict()
 
@@ -351,10 +398,14 @@ async def add_job_files(
     job_id: str, files: List[UploadFile] = File(...), user: dict = Depends(current_user)
 ):
     """Append files to a finished job you own and reprocess only the new ones."""
-    _owned_job(job_id, user)
+    job = _owned_job(job_id, user)
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
-    job = job_manager.add_and_reprocess(job_id, files, api_key=_user_api_key(user))
+    # Keep the provider/model the run originally used so merged results match.
+    provider = ((job.config or {}).get("provider") or "gemini").lower()
+    job = job_manager.add_and_reprocess(
+        job_id, files, api_key=_user_api_key(user, provider), provider=provider
+    )
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
     return job.to_dict()
@@ -382,7 +433,20 @@ def find_suppliers(job_id: str, mode: str = "all", user: dict = Depends(current_
     once; ``mode=per_item`` runs a separate search per line item.
     """
     _owned_job(job_id, user)
-    err = supplier_finder.start(job_id, mode, api_key=_user_api_key(user))
+    entry = _user_settings(user)
+    # The toggle decides whether supplier search follows the user's chosen
+    # provider or stays pinned to Gemini (the classic grounding behaviour).
+    if entry.get("supplier_search_provider", True):
+        provider = get_spec(entry.get("ai_provider")).id
+    else:
+        provider = "gemini"
+    err = supplier_finder.start(
+        job_id,
+        mode,
+        api_key=_user_api_key(user, provider),
+        provider=provider,
+        model=entry.get(f"{provider}_model"),
+    )
     if err:
         if err == "Job not found.":
             status = 404

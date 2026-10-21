@@ -25,11 +25,17 @@ import bcrypt
 import jwt
 from fastapi import Cookie, Depends, HTTPException
 
+from .ai_providers import PROVIDER_IDS
+
 DATA_ROOT = Path("./data")
 STORE_PATH = DATA_ROOT / "users.json"
 
 COOKIE_NAME = "ap_session"
 SESSION_DAYS = int(os.environ.get("SESSION_DAYS", "7"))
+
+# Per-user AI credentials/models, one pair per supported provider.
+_KEY_FIELDS = tuple(f"{p}_api_key" for p in PROVIDER_IDS)
+_MODEL_FIELDS = tuple(f"{p}_model" for p in PROVIDER_IDS)
 
 # Order of user-editable profile fields (username is the login identifier).
 _FIELDS = ("username", "display_name", "role")
@@ -112,8 +118,16 @@ class UserStore:
 
     @staticmethod
     def _public(user: Dict) -> Dict:
-        """Strip secrets and expose only a masked hint of the stored API key."""
-        out = {k: v for k, v in user.items() if k not in ("password_hash", "gemini_api_key")}
+        """Strip secrets and expose only masked hints of the stored API keys."""
+        out = {k: v for k, v in user.items() if k not in ("password_hash", *_KEY_FIELDS)}
+        out["keys"] = {
+            p: {
+                "has_api_key": bool(user.get(f"{p}_api_key")),
+                "api_key_hint": UserStore._mask_key(user.get(f"{p}_api_key")),
+            }
+            for p in PROVIDER_IDS
+        }
+        # Legacy Gemini-only fields kept for older clients.
         out["has_api_key"] = bool(user.get("gemini_api_key"))
         out["api_key_hint"] = UserStore._mask_key(user.get("gemini_api_key"))
         return out
@@ -179,33 +193,57 @@ class UserStore:
             self._write()
             return self._public(user)
 
-    def api_key(self, user_id: str) -> Optional[str]:
-        """Return the raw stored Gemini API key for a user (server-side use only)."""
+    def api_key(self, user_id: str, provider: str = "gemini") -> Optional[str]:
+        """Return the raw stored API key for a user/provider (server-side only)."""
+        provider = (provider or "gemini").strip().lower()
+        if provider not in PROVIDER_IDS:
+            return None
         with self._lock:
             user = next((u for u in self._items if u.get("id") == user_id), None)
-            return (user or {}).get("gemini_api_key") or None
+            return (user or {}).get(f"{provider}_api_key") or None
 
-    def set_ai_settings(self, user_id: str, api_key: Optional[str] = None,
-                        clear_key: bool = False, model: Optional[str] = None) -> Optional[Dict]:
-        """Update a user's Gemini key/model. ``clear_key`` removes the stored key.
+    def model_for(self, user_id: str, provider: str) -> Optional[str]:
+        """Return the user's saved model for a provider, if any."""
+        provider = (provider or "gemini").strip().lower()
+        if provider not in PROVIDER_IDS:
+            return None
+        with self._lock:
+            user = next((u for u in self._items if u.get("id") == user_id), None)
+            return (user or {}).get(f"{provider}_model") or None
 
-        Passing ``api_key=None`` with ``clear_key=False`` leaves the key as-is, so
-        callers can update just the model without resending the secret.
+    def set_ai_settings(self, user_id: str, provider: Optional[str] = None,
+                        supplier_search_provider: Optional[bool] = None,
+                        api_key: Optional[str] = None, clear_key: bool = False,
+                        model: Optional[str] = None) -> Optional[Dict]:
+        """Update a user's AI provider, per-provider key/model and search toggle.
+
+        ``provider`` selects both the active provider and the target of the
+        ``api_key``/``model`` edits (defaulting to Gemini for backwards
+        compatibility). ``clear_key=True`` removes that provider's stored key.
+        Passing ``api_key=None`` with ``clear_key=False`` leaves keys as-is, so
+        callers can update just the model or provider without resending secrets.
         """
+        target = (provider or "gemini").strip().lower()
+        if target not in PROVIDER_IDS:
+            raise ValueError(f"Unknown AI provider '{provider}'.")
         with self._lock:
             user = next((u for u in self._items if u.get("id") == user_id), None)
             if user is None:
                 return None
+            if provider is not None:
+                user["ai_provider"] = target
+            if supplier_search_provider is not None:
+                user["supplier_search_provider"] = bool(supplier_search_provider)
             if clear_key:
-                user.pop("gemini_api_key", None)
+                user.pop(f"{target}_api_key", None)
             elif api_key:
-                user["gemini_api_key"] = api_key.strip()
+                user[f"{target}_api_key"] = api_key.strip()
             if model is not None:
                 m = model.strip()
                 if m:
-                    user["gemini_model"] = m
+                    user[f"{target}_model"] = m
                 else:
-                    user.pop("gemini_model", None)
+                    user.pop(f"{target}_model", None)
             user["updated_at"] = _now()
             self._write()
             return self._public(user)
