@@ -11,14 +11,21 @@ vendor-specific failures into the shared quota/transient error vocabulary so
 callers can keep the existing retry + model-fallback loops.
 """
 import base64
+import io
 import json
 import os
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Union
 
 from pydantic import BaseModel
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 try:
     from google import genai
@@ -83,9 +90,9 @@ PROVIDERS: Dict[str, ProviderSpec] = {
             env_key="GEMINI_API_KEY",
             key_url="https://aistudio.google.com/apikey",
             package="google-genai",
-            default_model="gemini-3.8-flash",
-            models=("gemini-3.8-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"),
-            fallback_models=("gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"),
+            default_model="gemini-3.1-flash-lite",
+            models=("gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-flash-latest", "gemini-3.8-flash"),
+            fallback_models=("gemini-3.5-flash", "gemini-flash-latest", "gemini-3.8-flash"),
             search_timeout_ms=30000,
         ),
         ProviderSpec(
@@ -177,6 +184,12 @@ def is_transient_error(msg: str) -> bool:
     return any(m in low for m in _TRANSIENT_MARKERS)
 
 
+def is_deadline_error(msg: str) -> bool:
+    """The request timed out / the model hung: try the next model instead."""
+    low = (msg or "").lower()
+    return any(m in low for m in ("deadline", "timed out", "timeout", "504"))
+
+
 def is_unsupported_search(msg: str) -> bool:
     """The model/provider rejects the live search tool (try another model)."""
     low = (msg or "").lower()
@@ -226,13 +239,54 @@ def extract_json(text: str, schema):
     raise ValueError("The model response did not contain valid JSON for the expected schema.")
 
 
+_MAX_IMAGE_DIM = 1600
+_MAX_IMAGE_BYTES = 900_000
+
+
+def _shrink_image(data: bytes, mime: str) -> tuple:
+    """Downscale/re-encode large images so vision calls stay small and fast.
+
+    Falls back to the original bytes whenever Pillow is unavailable or the
+    re-encode would not actually shrink the file.
+    """
+    if Image is None:
+        return data, mime
+    try:
+        img = Image.open(io.BytesIO(data))
+        if len(data) <= _MAX_IMAGE_BYTES and max(img.size) <= _MAX_IMAGE_DIM:
+            return data, mime
+    except Exception:
+        return data, mime
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        if max(img.size) > _MAX_IMAGE_DIM:
+            img.thumbnail((_MAX_IMAGE_DIM, _MAX_IMAGE_DIM), Image.LANCZOS)
+        if img.mode in ("RGBA", "LA", "P"):
+            rgba = img.convert("RGBA")
+            bg = Image.new("RGB", rgba.size, (255, 255, 255))
+            bg.paste(rgba, mask=rgba.split()[-1])
+            img = bg
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80, optimize=True)
+        out = buf.getvalue()
+        if len(out) < len(data):
+            return out, "image/jpeg"
+    except Exception:
+        pass
+    return data, mime
+
+
 class ImagePart:
     """An image read from disk, encoded per provider at call time."""
 
     def __init__(self, path: str):
         self.path = path
-        self.data = Path(path).read_bytes()
-        self.mime = _MIME_BY_EXT.get(Path(path).suffix.lower(), "image/png")
+        raw = Path(path).read_bytes()
+        mime = _MIME_BY_EXT.get(Path(path).suffix.lower(), "image/png")
+        self.data, self.mime = _shrink_image(raw, mime)
 
 
 TextOrImage = Union[str, ImagePart]
@@ -257,6 +311,7 @@ class ProviderClient:
         self.model = resolve_model(self.spec.id, model)
         self.timeout_ms = timeout_ms
         self._client = None
+        self._client_lock = threading.Lock()
         self._check_sdk()
 
     # -- setup -------------------------------------------------------------
@@ -277,24 +332,27 @@ class ProviderClient:
 
     def _get_client(self):
         if self._client is None:
-            key = self.api_key
-            if self.provider == "gemini":
-                if self.timeout_ms:
-                    self._client = genai.Client(
-                        api_key=key, http_options=types.HttpOptions(timeout=self.timeout_ms)
-                    )
-                else:
-                    self._client = genai.Client(api_key=key)
-            elif self.provider == "openai":
-                kwargs = {"api_key": key}
-                if self.timeout_ms:
-                    kwargs["timeout"] = self.timeout_ms / 1000.0
-                self._client = OpenAI(**kwargs)
-            else:
-                kwargs = {"api_key": key}
-                if self.timeout_ms:
-                    kwargs["timeout"] = self.timeout_ms / 1000.0
-                self._client = anthropic.Anthropic(**kwargs)
+            with self._client_lock:
+                if self._client is None:
+                    key = self.api_key
+                    if self.provider == "gemini":
+                        if self.timeout_ms:
+                            self._client = genai.Client(
+                                api_key=key,
+                                http_options=types.HttpOptions(timeout=self.timeout_ms),
+                            )
+                        else:
+                            self._client = genai.Client(api_key=key)
+                    elif self.provider == "openai":
+                        kwargs = {"api_key": key, "max_retries": 0}
+                        if self.timeout_ms:
+                            kwargs["timeout"] = self.timeout_ms / 1000.0
+                        self._client = OpenAI(**kwargs)
+                    else:
+                        kwargs = {"api_key": key, "max_retries": 0}
+                        if self.timeout_ms:
+                            kwargs["timeout"] = self.timeout_ms / 1000.0
+                        self._client = anthropic.Anthropic(**kwargs)
         return self._client
 
     # -- public API --------------------------------------------------------
@@ -302,6 +360,8 @@ class ProviderClient:
                       temperature: float = 0.0, model: Optional[str] = None,
                       max_tokens: Optional[int] = None) -> str:
         """One structured generation; returns the raw JSON text for the caller."""
+        if isinstance(parts, (str, ImagePart)):
+            parts = [parts]
         model = model or self.model
         if self.provider == "gemini":
             return self._gemini_generate(parts, schema, system, temperature, model)

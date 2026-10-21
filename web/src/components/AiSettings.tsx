@@ -9,7 +9,13 @@ import type { AiProviderInfo, AiSettings as AiSettingsType } from "../types";
  * hint; a separate Clear button removes them. A final toggle decides whether
  * supplier search also runs on the chosen provider or stays on Gemini.
  */
-export default function AiSettings({ onError }: { onError: (msg: string) => void }) {
+export default function AiSettings({
+  onError,
+  onSaved,
+}: {
+  onError: (msg: string) => void;
+  onSaved?: () => void;
+}) {
   const [settings, setSettings] = useState<AiSettingsType | null>(null);
   const [loading, setLoading] = useState(true);
   const [keyInput, setKeyInput] = useState("");
@@ -57,6 +63,7 @@ export default function AiSettings({ onError }: { onError: (msg: string) => void
     try {
       const s = await updateAiSettings(input);
       apply(s);
+      onSaved?.();
       if (flashMsg) flash(flashMsg);
       return s;
     } catch (e) {
@@ -109,6 +116,21 @@ export default function AiSettings({ onError }: { onError: (msg: string) => void
 
   return (
     <div className="space-y-5">
+      {/* ── active AI banner (shown once the active provider has a key) ── */}
+      {active.has_api_key && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-teal/30 bg-teal/5 px-5 py-3">
+          <span className="font-mono text-xs uppercase tracking-[0.2em] text-teal/80">
+            currently using
+          </span>
+          <span className="font-mono text-sm text-teal">
+            {active.label} · {active.model || `default (${defaultModel})`}
+            <span className="text-paper-200/50">
+              {" "}· suppliers {supplierSearchOn ? `on ${active.label}` : "on Gemini"}
+            </span>
+          </span>
+        </div>
+      )}
+
       {/* ── provider ─────────────────────────────────────────────── */}
       <div className="rounded-2xl border border-ink-700 bg-ink-900/70 p-5">
         <div className="flex items-center justify-between">

@@ -232,7 +232,9 @@ export async function logout(): Promise<void> {
 /** Return the current user, or null when not signed in. */
 export async function getCurrentUser(): Promise<AuthUser | null> {
   try {
-    const res = await request(`${BASE}/auth/me`);
+    // Fail fast: a stalled backend must not leave the app on "checking session".
+    const signal = AbortSignal.timeout(8000);
+    const res = await request(`${BASE}/auth/me`, { signal });
     if (!res.ok) return null;
     const data = (await res.json()) as { user: AuthUser };
     return data.user;

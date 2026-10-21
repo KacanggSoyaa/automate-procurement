@@ -11,6 +11,8 @@ import sys
 import time
 import hashlib
 import random
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -25,6 +27,7 @@ from server.ai_providers import (  # noqa: E402
     ImagePart,
     ProviderClient,
     get_spec,
+    is_deadline_error,
     is_quota_error,
     is_transient_error,
 )
@@ -125,20 +128,31 @@ class AIProcessor:
 
     DEFAULT_MODEL = get_spec("gemini").default_model
     FALLBACK_MODELS = list(get_spec("gemini").fallback_models)
-    MAX_CHARS_PER_CHUNK = 120000
+    # Smaller chunks keep each request short and let several run in parallel.
+    MAX_CHARS_PER_CHUNK = 40000
     MAX_IMAGES = 12
-    CACHE_VERSION = "v5"
+    # Concurrent classification calls per run (raise only if your quota allows).
+    MAX_WORKERS = max(1, int(os.environ.get("AI_CLASSIFY_WORKERS", "4")))
+    CACHE_VERSION = "v6"
     CACHE_DIR = Path("./data/.ai_cache")
 
     def __init__(self, provider: str = None, model: str = None, api_key: str = None,
                  use_cache: bool = True):
         """Create the provider client and resolve the model/cache settings."""
         self.provider = get_spec(provider).id
-        self.client = ProviderClient(self.provider, api_key=api_key, model=model)
+        timeout_ms = int(os.environ.get("AI_REQUEST_TIMEOUT_MS", "90000"))
+        self.client = ProviderClient(
+            self.provider, api_key=api_key, model=model, timeout_ms=timeout_ms
+        )
         self.api_key = self.client.api_key  # raises early with a clear message when no key exists
         self.model = self.client.model
         spec = get_spec(self.provider)
         self.models = [self.model] + [m for m in spec.fallback_models if m != self.model]
+        # Models that hung or ran out of quota during this run: skip them for
+        # the remaining chunks instead of paying the timeout again every time.
+        self._bad_models = set()
+        self._model_failures = {}
+        self._bad_lock = threading.Lock()
         self.use_cache = use_cache
         if self.use_cache:
             self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -165,14 +179,17 @@ class AIProcessor:
         ).hexdigest()
         return self.CACHE_DIR / f"{key}.json"
 
-    def _generate(self, contents, cache_seed: str, retries: int = 6) -> Classification:
+    def _generate(self, contents, cache_seed: str, retries: int = 2) -> Classification:
         """Call the provider, trying each fallback model, retrying transient errors.
 
-        Daily-quota errors skip straight to the next model instead of backing
-        off, since a per-day limit will not clear during this run.
+        Daily-quota and timeout errors skip straight to the next model instead
+        of backing off, and the model is skipped for the rest of the run: a
+        per-day limit will not clear, and a hung model rarely recovers.
         """
         last_err = None
-        for model in self.models:
+        with self._bad_lock:
+            candidates = [m for m in self.models if m not in self._bad_models] or list(self.models)
+        for model in candidates:
             cache_path = self._cache_path(cache_seed, model)
             if self.use_cache and cache_path.exists():
                 try:
@@ -191,20 +208,41 @@ class AIProcessor:
                         model=model,
                     )
                     if self.use_cache:
-                        cache_path.write_text(text, encoding="utf-8")
+                        try:
+                            cache_path.write_text(text, encoding="utf-8")
+                        except Exception:
+                            pass
                     return Classification.model_validate_json(text)
                 except Exception as e:
                     last_err = e
                     msg = str(e)
                     if is_quota_error(msg):
+                        self._mark_bad(model)
                         break
-                    if not is_transient_error(msg):
+                    if is_deadline_error(msg):
+                        self._mark_bad(model)
                         break
-                    delay = min(60, 2 ** attempt) + random.uniform(0, 1)
+                    if not is_transient_error(msg) or attempt == retries - 1:
+                        self._note_failure(model)
+                        break
+                    delay = min(8, 2 ** attempt) + random.uniform(0, 1)
                     time.sleep(delay)
         raise RuntimeError(
             f"{self.provider} classification failed on all models: {last_err}"
         )
+
+    def _mark_bad(self, model: str) -> None:
+        with self._bad_lock:
+            if model not in self._bad_models and len(self._bad_models) < len(self.models) - 1:
+                self._bad_models.add(model)
+
+    def _note_failure(self, model: str) -> None:
+        """Drop a model that keeps failing (e.g. sustained 503s) from this run."""
+        with self._bad_lock:
+            self._model_failures[model] = self._model_failures.get(model, 0) + 1
+            if self._model_failures[model] >= 2:
+                if model not in self._bad_models and len(self._bad_models) < len(self.models) - 1:
+                    self._bad_models.add(model)
 
     def _image_part(self, path: str):
         """Read an image file into a provider-agnostic image part."""
@@ -269,6 +307,10 @@ class AIProcessor:
     def classify(self, text: str, image_paths: List[str] = None, progress=None) -> Dict:
         """Classify all text chunks and images, then return cleaned results.
 
+        Chunks and the image batch are independent requests, so they run
+        concurrently (up to ``MAX_WORKERS`` at a time); merging happens
+        single-threaded afterwards in the original deterministic order.
+
         Returns a dict with ``line_items``, the requirement categories and the
         merged document ``meta`` fields.
         """
@@ -276,15 +318,54 @@ class AIProcessor:
         merged = Classification()
         meta = {}
 
-        for i, chunk in enumerate(chunks, 1):
-            if progress:
-                progress('text', i, len(chunks))
-            self._merge(merged, meta, self._generate(chunk, chunk))
+        has_images = bool(image_paths)
+        total_tasks = len(chunks) + (1 if has_images else 0)
+        if not total_tasks:
+            return {
+                "line_items": [],
+                "technical": [],
+                "submission": [],
+                "mandatory": [],
+                "commercial": [],
+                "dates": [],
+                "meta": meta,
+            }
 
-        if image_paths:
+        lock = threading.Lock()
+        text_done = 0
+        results: List[tuple] = []
+
+        def report(kind: str, i: int, n: int):
             if progress:
-                progress('images', 1, 1)
-            self._merge(merged, meta, self._classify_images(image_paths))
+                progress(kind, i, n)
+
+        pool = ThreadPoolExecutor(max_workers=min(self.MAX_WORKERS, total_tasks))
+        futures = {}
+        try:
+            for idx, chunk in enumerate(chunks):
+                futures[pool.submit(self._generate, chunk, chunk)] = ("text", idx)
+            if has_images:
+                futures[pool.submit(self._classify_images, image_paths)] = ("images", 0)
+            for fut in as_completed(futures):
+                kind, idx = futures[fut]
+                result = fut.result()
+                if kind == "text":
+                    with lock:
+                        text_done += 1
+                        done = text_done
+                    report("text", done, len(chunks))
+                else:
+                    report("images", 1, 1)
+                results.append((kind, idx, result))
+        except Exception:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        pool.shutdown(wait=True)
+
+        for _kind, _idx, result in sorted(
+            results, key=lambda r: (r[0] == "images", r[1])
+        ):
+            self._merge(merged, meta, result)
 
         line_items = self._filter_items(merged.line_items)
 

@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from .ai_providers import PROVIDERS, get_spec
+from .ai_providers import PROVIDERS, get_spec, provider_label
 from .auth import (
     COOKIE_NAME,
     SESSION_DAYS,
@@ -322,6 +322,18 @@ def _user_settings(user: dict) -> dict:
     return user_store.get(user.get("id", "")) or {}
 
 
+def _require_personal_key(user: dict, provider: str) -> None:
+    """Reject AI actions until the caller has saved their own key for ``provider``."""
+    if not user_store.api_key(user.get("id", ""), provider):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Add your {provider_label(provider)} API key in Settings "
+                "before using the system."
+            ),
+        )
+
+
 def _owned_job(job_id: str, user: dict):
     """Load a job, raising 404 unless it belongs to the requesting user."""
     job = job_manager.get(job_id)
@@ -348,6 +360,7 @@ async def create_job(
         raise HTTPException(status_code=400, detail="No files uploaded.")
     entry = _user_settings(user)
     provider = get_spec(entry.get("ai_provider")).id
+    _require_personal_key(user, provider)
     job = job_manager.create(
         files,
         model=model or entry.get(f"{provider}_model"),
@@ -403,6 +416,7 @@ async def add_job_files(
         raise HTTPException(status_code=400, detail="No files uploaded.")
     # Keep the provider/model the run originally used so merged results match.
     provider = ((job.config or {}).get("provider") or "gemini").lower()
+    _require_personal_key(user, provider)
     job = job_manager.add_and_reprocess(
         job_id, files, api_key=_user_api_key(user, provider), provider=provider
     )
@@ -440,6 +454,7 @@ def find_suppliers(job_id: str, mode: str = "all", user: dict = Depends(current_
         provider = get_spec(entry.get("ai_provider")).id
     else:
         provider = "gemini"
+    _require_personal_key(user, provider)
     err = supplier_finder.start(
         job_id,
         mode,

@@ -169,6 +169,10 @@ export interface AuthUser {
   display_name: string;
   role: "admin" | "user";
   created_at?: string;
+  ai_provider?: string;
+  supplier_search_provider?: boolean;
+  keys?: Record<string, { has_api_key: boolean; api_key_hint: string | null }>;
+  has_api_key?: boolean;
 }
 
 /** One supported AI provider as exposed by the settings API. */

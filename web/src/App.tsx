@@ -49,6 +49,13 @@ type TabId =
   | (typeof PROJECT_TABS)[number]["id"]
   | "settings";
 
+/** Human labels for AI providers, used by the API-key setup wall. */
+const PROVIDER_LABELS: Record<string, string> = {
+  gemini: "Google Gemini",
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+};
+
 /**
  * Root component: holds the selected files, starts a processing job and polls
  * it until it finishes, then renders the results. Past runs are listed in the
@@ -85,6 +92,19 @@ export default function App() {
   const totalSize = useMemo(() => files.reduce((sum, f) => sum + f.size, 0), [files]);
   const running = busy || pollId != null;
 
+  // Every account must save its own AI key before using the system. Supplier
+  // search pinned to Gemini additionally needs a personal Gemini key.
+  const activeProvider = user?.ai_provider ?? "gemini";
+  const missingProviders = useMemo(() => {
+    if (!user) return [];
+    const required = new Set<string>([activeProvider]);
+    if (user.supplier_search_provider === false) required.add("gemini");
+    return [...required].filter(
+      (p) => !(user.keys?.[p]?.has_api_key ?? (p === "gemini" ? Boolean(user.has_api_key) : false)),
+    );
+  }, [user, activeProvider]);
+  const needsSetup = !!user && missingProviders.length > 0;
+
   /** Reload the saved-run history from the backend. */
   const loadHistory = useCallback(async () => {
     try {
@@ -98,13 +118,19 @@ export default function App() {
   }, []);
 
   // Resolve the current session on mount; show login until it succeeds.
+  // `getCurrentUser` never rejects and gives up after a short timeout, so this
+  // can never leave the UI stuck on "checking session…".
   useEffect(() => {
     let cancelled = false;
-    getCurrentUser().then((u) => {
-      if (cancelled) return;
-      setUser(u);
-      setAuthChecked(true);
-    });
+    getCurrentUser()
+      .then((u) => {
+        if (cancelled) return;
+        setUser(u);
+        setAuthChecked(true);
+      })
+      .catch(() => {
+        if (!cancelled) setAuthChecked(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -394,8 +420,34 @@ export default function App() {
             </div>
           )}
 
+          {/* ── setup wall: blocks the app until a personal AI key exists ── */}
+          {needsSetup && tab !== "settings" && (
+            <section className="rounded-2xl border border-amber/30 bg-amber/5 p-6">
+              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">
+                Setup required
+              </p>
+              <h1 className="mt-3 font-mono text-2xl font-semibold leading-tight text-paper-50 sm:text-3xl">
+                Add your API key first.
+              </h1>
+              <p className="mt-3 max-w-xl font-sans text-sm leading-relaxed text-paper-200/70">
+                Every account must connect its own AI API key before running jobs or supplier
+                searches. You still need a key for{" "}
+                <span className="text-paper-50">
+                  {missingProviders.map((p) => PROVIDER_LABELS[p] ?? p).join(" and ")}
+                </span>
+                .
+              </p>
+              <button
+                onClick={() => setTab("settings")}
+                className="mt-5 rounded-lg bg-amber px-5 py-2.5 font-mono text-sm font-semibold text-space-950 transition hover:bg-amber-light"
+              >
+                GO TO SETTINGS
+              </button>
+            </section>
+          )}
+
           {/* ── 01 · pipeline: upload, run, results ─────────────────────── */}
-          <section className={tab === "pipeline" ? "" : "hidden"}>
+          <section className={tab === "pipeline" && !needsSetup ? "" : "hidden"}>
             <section className="pb-8 pt-6">
               <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 01 / 02 — Pipeline</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
@@ -486,7 +538,7 @@ export default function App() {
           </section>
 
           {/* ── 02 · supplier list (master directory) ───────────────────── */}
-          <section className={tab === "directory" ? "" : "hidden"}>
+          <section className={tab === "directory" && !needsSetup ? "" : "hidden"}>
             <section className="pb-8 pt-6">
               <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 02 / 02 — Supplier List</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
@@ -502,7 +554,7 @@ export default function App() {
           </section>
 
           {/* ── 03 · supplier search (project) ──────────────────────────── */}
-          <section className={tab === "suppliers" ? "" : "hidden"}>
+          <section className={tab === "suppliers" && !needsSetup ? "" : "hidden"}>
             <section className="pb-8 pt-6">
               <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Project — Supplier Search</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
@@ -526,7 +578,7 @@ export default function App() {
           </section>
 
           {/* ── 04 · quotation email (project) ──────────────────────────── */}
-          <section className={tab === "emails" ? "" : "hidden"}>
+          <section className={tab === "emails" && !needsSetup ? "" : "hidden"}>
             <section className="pb-8 pt-6">
               <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Project — Quotation Email</p>
               <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
@@ -563,7 +615,18 @@ export default function App() {
               </p>
             </section>
 
-            <AiSettings onError={(msg) => setError(msg)} />
+            <AiSettings
+              onError={(msg) => setError(msg)}
+              onSaved={() => {
+                getCurrentUser()
+                  .then((u) => {
+                    if (u) setUser(u);
+                  })
+                  .catch(() => {
+                    /* keep the old user; the wall re-checks on next load */
+                  });
+              }}
+            />
 
             {user.role === "admin" && (
               <section className="mt-12">
