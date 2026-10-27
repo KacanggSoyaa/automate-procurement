@@ -532,7 +532,7 @@ export default function App() {
                 {done && (
                   <AddFiles jobId={job.id} onProcessed={onFilesAdded} onError={(msg) => setError(msg)} />
                 )}
-                {done && <Results job={job} />}
+                {done && <Results job={job} onUpdated={setJob} />}
                 {done && <VersionsAudit job={job} />}
               </div>
             )}

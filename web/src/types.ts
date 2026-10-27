@@ -15,6 +15,16 @@ export interface LineItem {
   specs?: SpecPair[];
 }
 
+/** Manually editable text fields for one line item. */
+export interface LineItemEdit {
+  item_no: string;
+  item_name: string;
+  item_number: string;
+  description: string;
+  qty: string;
+  uom: string;
+}
+
 /** A copy-ready request-for-quotation email generated for one line item. */
 export interface RfqEmail {
   subject: string;
@@ -117,7 +127,7 @@ export interface VersionInfo {
   id: number;
   tag: string;
   ts: string;
-  reason: "run" | "reprocess";
+  reason: "run" | "reprocess" | "edit" | "delete";
   files: string[];
   files_processed: number;
   line_items_count: number;

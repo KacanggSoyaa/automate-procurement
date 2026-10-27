@@ -1,4 +1,5 @@
 """In-memory job queue that runs the extraction pipeline in a thread pool."""
+import os
 import shutil
 import threading
 import traceback
@@ -11,12 +12,32 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .history import history_store
-from .pipeline import run_pipeline
+from .pipeline import rebuild_artifacts, run_pipeline
 from .upload_guard import UploadValidationError, save_uploads
 
 # Where uploaded files and per-job output workspaces are stored.
 UPLOAD_ROOT = Path("./data/uploads")
 WORKSPACE_ROOT = Path("./data/workspaces")
+
+_EDITABLE_ITEM_FIELDS = (
+    "item_no", "item_name", "item_number", "description", "qty", "uom",
+)
+
+
+class JobEditError(RuntimeError):
+    """Raised when a job cannot be edited in its current state."""
+
+    def __init__(self, message: str, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _clean_item_text(value):
+    """Trim an editable item field, treating blank input as cleared."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 @dataclass
@@ -106,7 +127,8 @@ class JobManager:
     def __init__(self, max_workers: int = 2):
         """Set up the in-memory job store and the worker thread pool."""
         self._jobs: Dict[str, Job] = {}
-        self._lock = threading.Lock()
+        # Re-entrant: editing holds the lock while it snapshots a new version.
+        self._lock = threading.RLock()
         self._pool = ThreadPoolExecutor(max_workers=max_workers)
 
     def create(self, files: List, model: Optional[str] = None, include_images: bool = True,
@@ -307,6 +329,135 @@ class JobManager:
             history_store.save(job)
             traceback.print_exc()
 
+    def update_line_item(self, job_id: str, index: int, changes: Dict,
+                         actor: Optional[str] = None) -> Job:
+        """Apply a manual edit to one line item and rebuild all derived output.
+
+        The edited job stays ``done``; a new version snapshot and audit event
+        record who changed which item so the original run remains traceable.
+        """
+        job = self.get(job_id)
+        if job is None:
+            raise JobEditError("Job not found.", 404)
+        with self._lock:
+            if job.status != "done" or not job.data:
+                raise JobEditError(
+                    "Wait for the run to finish before editing line items.", 409
+                )
+            items = list(job.data.get("line_items") or [])
+            if index < 0 or index >= len(items):
+                raise JobEditError("Line item not found.", 404)
+
+            original = dict(items[index])
+            updated = dict(original)
+            changed: List[str] = []
+            for field in _EDITABLE_ITEM_FIELDS:
+                if field not in changes:
+                    continue
+                value = _clean_item_text(changes.get(field))
+                if value != _clean_item_text(original.get(field)):
+                    changed.append(field)
+                updated[field] = value
+
+            new_uom = _clean_item_text(changes.get("uom")) if "uom" in changes else None
+            if "uom" in changes and new_uom is None and "unit" in updated:
+                updated.pop("unit", None)
+                if "uom" not in changed:
+                    changed.append("uom")
+            if not changed:
+                return job
+
+            new_items = list(items)
+            new_items[index] = updated
+            new_data = dict(job.data)
+            new_data["line_items"] = new_items
+            label = (
+                updated.get("item_name")
+                or updated.get("item_number")
+                or f"item {index + 1}"
+            )
+            fields = ", ".join(field.replace("_", " ") for field in changed)
+            detail = f"Item {index + 1} ({label}) edited: {fields}"
+            self._commit_item_change(
+                job,
+                new_data,
+                reason="edit",
+                action="line_items_edited",
+                detail=detail,
+                message="Line items updated",
+                actor=actor,
+            )
+        return job
+
+    def delete_line_item(self, job_id: str, index: int,
+                         actor: Optional[str] = None) -> Job:
+        """Remove one line item and rebuild all derived output."""
+        job = self.get(job_id)
+        if job is None:
+            raise JobEditError("Job not found.", 404)
+        with self._lock:
+            if job.status != "done" or not job.data:
+                raise JobEditError(
+                    "Wait for the run to finish before deleting line items.", 409
+                )
+            items = list(job.data.get("line_items") or [])
+            if index < 0 or index >= len(items):
+                raise JobEditError("Line item not found.", 404)
+
+            removed = items.pop(index)
+            new_data = dict(job.data)
+            new_data["line_items"] = items
+            label = (
+                removed.get("item_name")
+                or removed.get("item_number")
+                or f"item {index + 1}"
+            )
+            detail = f"Item {index + 1} ({label}) deleted"
+            self._commit_item_change(
+                job,
+                new_data,
+                reason="delete",
+                action="line_item_deleted",
+                detail=detail,
+                message="Line item deleted",
+                actor=actor,
+            )
+        return job
+
+    def _commit_item_change(self, job: Job, new_data: Dict, *, reason: str,
+                            action: str, detail: str, message: str,
+                            actor: Optional[str]) -> None:
+        """Rebuild derived files, snapshot a version and persist one item change."""
+        out = (
+            Path(job.output_path)
+            if job.output_path
+            else WORKSPACE_ROOT / job.id / "specification_sheet.docx"
+        )
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_name(f".{out.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            new_data = rebuild_artifacts(new_data, str(tmp))
+            os.replace(tmp, out)
+        except Exception:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
+
+        job.data = new_data
+        job.output_path = str(out)
+        version = self._snapshot_version(job, reason)
+        self._update(job, message=message, log=detail)
+        self._audit(
+            job,
+            action,
+            detail,
+            version=version["id"] if version else None,
+            actor=actor,
+        )
+        history_store.save(job)
+
     def _snapshot_version(self, job: Job, reason: str) -> Optional[Dict]:
         """Copy a finished run's output files into an immutable, versioned folder.
 
@@ -342,11 +493,12 @@ class JobManager:
             job.versions.append(version)
         return version
 
-    def _audit(self, job: Job, action: str, detail: str = "", version: Optional[int] = None):
+    def _audit(self, job: Job, action: str, detail: str = "",
+               version: Optional[int] = None, actor: Optional[str] = None):
         """Append an immutable event to a job's audit trail."""
         event = {
             "ts": datetime.now().isoformat(timespec="seconds"),
-            "actor": "system",
+            "actor": actor or "system",
             "action": action,
             "detail": detail,
         }

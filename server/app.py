@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Respon
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .ai_providers import PROVIDERS, get_spec, provider_label
 from .auth import (
@@ -31,7 +31,7 @@ from .auth import (
     user_from_token,
     user_store,
 )
-from .jobs import job_manager
+from .jobs import JobEditError, job_manager
 from .supplier_store import supplier_store
 from .suppliers import quota_status, supplier_finder
 from .upload_guard import MAX_REQUEST_BYTES, UploadValidationError
@@ -40,6 +40,16 @@ from .upload_guard import MAX_REQUEST_BYTES, UploadValidationError
 class RenameRequest(BaseModel):
     """Body for renaming a saved history entry."""
     title: str
+
+
+class LineItemUpdate(BaseModel):
+    """Editable fields for one extracted line item."""
+    item_no: Optional[str] = Field(None, max_length=100)
+    item_name: Optional[str] = Field(None, max_length=500)
+    item_number: Optional[str] = Field(None, max_length=200)
+    description: Optional[str] = Field(None, max_length=5000)
+    qty: Optional[str] = Field(None, max_length=100)
+    uom: Optional[str] = Field(None, max_length=100)
 
 
 class LoginRequest(BaseModel):
@@ -548,6 +558,40 @@ async def create_job(
 def get_job(job_id: str, user: dict = Depends(current_user)):
     """Return the current status, logs and results of a job you own."""
     return _owned_job(job_id, user).to_dict()
+
+
+@app.patch("/api/jobs/{job_id}/items/{index}")
+def update_job_item(
+    job_id: str, index: int, body: LineItemUpdate,
+    user: dict = Depends(current_user),
+):
+    """Manually edit one extracted line item and rebuild the run's outputs."""
+    _owned_job(job_id, user)
+    try:
+        job = job_manager.update_line_item(
+            job_id,
+            index,
+            body.model_dump(exclude_unset=True),
+            actor=user.get("username"),
+        )
+    except JobEditError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    return job.to_dict()
+
+
+@app.delete("/api/jobs/{job_id}/items/{index}")
+def delete_job_item(
+    job_id: str, index: int, user: dict = Depends(current_user),
+):
+    """Delete one extracted line item and rebuild the run's outputs."""
+    _owned_job(job_id, user)
+    try:
+        job = job_manager.delete_line_item(
+            job_id, index, actor=user.get("username")
+        )
+    except JobEditError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    return job.to_dict()
 
 
 @app.get("/api/history")

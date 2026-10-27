@@ -69,6 +69,17 @@ def _merge_meta(prev: Dict, fresh: Dict) -> Dict:
     return merged
 
 
+def rebuild_artifacts(data: Dict, output_path: str) -> Dict:
+    """Rebuild derived counts, RFQ emails and the spec sheet after manual edits."""
+    rebuilt = dict(data)
+    items = list(rebuilt.get("line_items") or [])
+    rebuilt["line_items"] = items
+    rebuilt["line_items_count"] = len(items)
+    rebuilt["rfq_emails"] = RFQEmailGenerator().build_emails(rebuilt)
+    EnhancedSpecSheetGenerator().generate(rebuilt, output_path)
+    return rebuilt
+
+
 def run_pipeline(
     input_dir: str,
     output_path: str,

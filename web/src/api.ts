@@ -4,6 +4,7 @@ import type {
   AuthUser,
   HistoryItem,
   Job,
+  LineItemEdit,
   QuotaStatus,
   SavedSupplier,
   SupplierDraft,
@@ -77,6 +78,50 @@ export async function addJobFiles(id: string, files: File[]): Promise<Job> {
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Failed to add files (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as Job;
+}
+
+/** Manually edit one line item and rebuild the run's outputs. */
+export async function updateJobItem(
+  id: string,
+  index: number,
+  draft: LineItemEdit,
+): Promise<Job> {
+  const res = await request(`${BASE}/jobs/${id}/items/${index}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+  if (!res.ok) {
+    const raw = await res.text();
+    let detail = raw;
+    try {
+      const parsed = JSON.parse(raw) as { detail?: string };
+      detail = parsed.detail || raw;
+    } catch {
+      // Plain-text error body.
+    }
+    throw new Error(detail || `Failed to update item (${res.status})`);
+  }
+  return (await res.json()) as Job;
+}
+
+/** Delete one line item and rebuild the run's outputs. */
+export async function deleteJobItem(id: string, index: number): Promise<Job> {
+  const res = await request(`${BASE}/jobs/${id}/items/${index}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const raw = await res.text();
+    let detail = raw;
+    try {
+      const parsed = JSON.parse(raw) as { detail?: string };
+      detail = parsed.detail || raw;
+    } catch {
+      // Plain-text error body.
+    }
+    throw new Error(detail || `Failed to delete item (${res.status})`);
   }
   return (await res.json()) as Job;
 }

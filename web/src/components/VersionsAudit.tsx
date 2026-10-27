@@ -4,6 +4,8 @@ import type { Job } from "../types";
 const REASON_LABELS: Record<string, string> = {
   run: "Initial run",
   reprocess: "Incremental reprocess",
+  edit: "Manual item edit",
+  delete: "Item deleted",
 };
 
 /** Render "2026-10-12T14:03:05" as "2026-10-12 14:03" for narrow columns. */
