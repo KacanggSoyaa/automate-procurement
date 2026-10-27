@@ -58,6 +58,19 @@ def _is_heading(name: str) -> bool:
     return bool(_GENERIC_RE.match(text))
 
 
+def _clean_input_text(text: str) -> str:
+    """Strip repetitive whitespace, page numbering lines, and separator noise to save tokens."""
+    if not text:
+        return ""
+    # Strip standalone page numbering lines, e.g. "Page 12 of 34", "Page 12", "--- Page 1 ---"
+    text = re.sub(r"(?im)^\s*(?:[-_*~=]{2,}\s*)?page\s+\d+(\s+of\s+\d+)?\s*(?:[-_*~=]{2,}\s*)?$", "", text)
+    # Strip standalone decorative horizontal separators
+    text = re.sub(r"(?m)^[-=_*~]{4,}\s*$", "", text)
+    # Collapse 3 or more blank lines into a single blank line
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 class SpecPair(BaseModel):
     """A single technical specification (parameter -> value) for an item."""
     parameter: str
@@ -111,7 +124,7 @@ SYSTEM_INSTRUCTION = (
     "categories: technical_requirements, commercial_requirements, submission_rules, mandatory_requirements, dates.\n"
     "Also extract project_ref (reference number), project_title, delivery_location and buyer if present. "
     "Keep original wording. Do not invent data. Omit irrelevant boilerplate to stay concise. "
-    "To avoid overwhelming output, return the most relevant requirements only (at most about 40 per category per section)."
+    "Omit boilerplate. Return only critical, distinct requirements (at most 5 to 8 concise, non-redundant items per category)."
 )
 
 IMAGE_INSTRUCTION = (
@@ -129,11 +142,12 @@ class AIProcessor:
     DEFAULT_MODEL = get_spec("gemini").default_model
     FALLBACK_MODELS = list(get_spec("gemini").fallback_models)
     # Smaller chunks keep each request short and let several run in parallel.
-    MAX_CHARS_PER_CHUNK = 40000
+    # Modern models (Gemini Flash, GPT-4o-mini, Claude Haiku) process tenders in 1-2 calls.
+    MAX_CHARS_PER_CHUNK = 160000
     MAX_IMAGES = 12
     # Concurrent classification calls per run (raise only if your quota allows).
     MAX_WORKERS = max(1, int(os.environ.get("AI_CLASSIFY_WORKERS", "4")))
-    CACHE_VERSION = "v6"
+    CACHE_VERSION = "v7"
     CACHE_DIR = Path("./data/.ai_cache")
 
     def __init__(self, provider: str = None, model: str = None, api_key: str = None,
@@ -314,7 +328,8 @@ class AIProcessor:
         Returns a dict with ``line_items``, the requirement categories and the
         merged document ``meta`` fields.
         """
-        chunks = self._chunk(text) if text.strip() else []
+        cleaned_text = _clean_input_text(text)
+        chunks = self._chunk(cleaned_text) if cleaned_text else []
         merged = Classification()
         meta = {}
 

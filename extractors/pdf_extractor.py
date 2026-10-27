@@ -37,7 +37,12 @@ class PDFExtractor:
         if fitz is not None:
             doc = fitz.open(pdf_path)
             try:
-                return "\n".join(page.get_text() for page in doc)
+                pages = []
+                for page in doc:
+                    text = page.get_text()
+                    if text and text.strip():
+                        pages.append(text.strip())
+                return "\n\n".join(pages)
             finally:
                 doc.close()
 

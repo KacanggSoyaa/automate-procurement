@@ -40,8 +40,8 @@ from server.history import history_store
 from server.jobs import job_manager
 from server.websearch import WebSearchUnavailable, search_many
 
-TARGET_SUPPLIERS = 10
-MAX_FOLLOW_UP_PASSES = 2
+TARGET_SUPPLIERS = 5
+MAX_FOLLOW_UP_PASSES = 1
 SUPPLIER_MODES = ("all", "per_item")
 
 # Last-known Google-Search-grounding quota state, exposed at GET /api/quota so
@@ -319,7 +319,7 @@ class SupplierFinder:
             for _ in range(MAX_FOLLOW_UP_PASSES):
                 suppliers = self._dedupe(suppliers)
                 have = len([s for s in suppliers if s.company_name or s.website])
-                if have >= TARGET_SUPPLIERS:
+                if have >= 3:
                     break
                 known = " | ".join((s.company_name or s.website or "") for s in suppliers[:40]) or "none"
                 extra = self._call(
@@ -409,7 +409,7 @@ class SupplierFinder:
             for _ in range(MAX_FOLLOW_UP_PASSES):
                 suppliers = self._dedupe(suppliers)
                 have = len([s for s in suppliers if s.company_name or s.website])
-                if have >= TARGET_SUPPLIERS:
+                if have >= 3:
                     break
                 known = " | ".join((s.company_name or s.website or "") for s in suppliers[:40]) or "none"
                 extra = self._call(
