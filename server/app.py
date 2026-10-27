@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import urlsplit
 
 try:
     from dotenv import load_dotenv
@@ -21,15 +22,19 @@ from .auth import (
     COOKIE_NAME,
     SESSION_DAYS,
     bootstrap_admin,
+    cookie_samesite,
+    cookie_secure,
     current_user,
-    decode_token,
+    login_throttle,
     make_token,
     require_admin,
+    user_from_token,
     user_store,
 )
 from .jobs import job_manager
 from .supplier_store import supplier_store
 from .suppliers import quota_status, supplier_finder
+from .upload_guard import MAX_REQUEST_BYTES, UploadValidationError
 
 
 class RenameRequest(BaseModel):
@@ -87,16 +92,79 @@ class SupplierImportRequest(BaseModel):
     """Bulk-add a list of suppliers (e.g. one run's shortlist) to the directory."""
     suppliers: List[SupplierPayload] = []
 
-app = FastAPI(title="Automate Procurement API", version="0.1.0")
+_DEFAULT_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
-# The Vite dev server runs on a different port, so allow cross-origin calls.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+def _parse_allowed_origins() -> List[str]:
+    """Read ALLOWED_ORIGINS, ignoring wildcards (invalid with credentials)."""
+    origins = []
+    for value in os.environ.get("ALLOWED_ORIGINS", "").split(","):
+        value = value.strip().rstrip("/")
+        if value and value != "*":
+            origins.append(value)
+    return origins or list(_DEFAULT_ORIGINS)
+
+
+_ALLOWED_ORIGINS = _parse_allowed_origins()
+
+
+def _origin_allowed(origin: str, request: Request) -> bool:
+    """Accept configured origins and the app's own origin (same host)."""
+    origin = (origin or "").strip().rstrip("/")
+    if not origin:
+        return True
+    if origin in _ALLOWED_ORIGINS:
+        return True
+    try:
+        parsed = urlsplit(origin)
+    except ValueError:
+        return False
+    host = request.headers.get("host", "")
+    return bool(parsed.netloc and host and parsed.netloc.casefold() == host.casefold())
+
+
+def _set_session_cookie(response: Response, request: Request, user: Dict) -> None:
+    """Issue the httpOnly session cookie with hardened attributes."""
+    secure = cookie_secure(request) or cookie_samesite() == "none"
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=make_token(user),
+        max_age=SESSION_DAYS * 24 * 3600,
+        httponly=True,
+        samesite=cookie_samesite(),
+        secure=secure,
+        path="/",
+    )
+
+
+class LimitBodySizeMiddleware:
+    """Cap request bodies even when Content-Length is absent (chunked uploads)."""
+
+    def __init__(self, app, max_bytes: int):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or not scope.get("path", "").startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+
+        received = 0
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    raise HTTPException(status_code=413, detail="Upload is too large.")
+            return message
+
+        await self.app(scope, limited_receive, send)
+
+
+app = FastAPI(title="Automate Procurement API", version="0.1.0")
 
 # Paths that must stay reachable without a session.
 _PUBLIC_PATHS = {
@@ -116,12 +184,68 @@ async def require_auth(request: Request, call_next):
     login screen and discover whether any users exist yet.
     """
     path = request.url.path
+    if path.startswith("/api") and request.method not in _SAFE_METHODS:
+        source = request.headers.get("origin")
+        if not source:
+            referer = request.headers.get("referer", "")
+            if referer:
+                parts = urlsplit(referer)
+                source = f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else "null"
+        if source and not _origin_allowed(source, request):
+            return JSONResponse(
+                status_code=403, content={"detail": "Cross-origin request rejected."}
+            )
+
     if path.startswith("/api") and path not in _PUBLIC_PATHS:
-        token = request.cookies.get(COOKIE_NAME)
-        payload = decode_token(token) if token else None
-        if not payload or not user_store.get(payload.get("sub", "")):
+        user = user_from_token(request.cookies.get(COOKIE_NAME))
+        if not user:
             return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+        request.state.user = user
     return await call_next(request)
+
+
+@app.middleware("http")
+async def limit_request_body(request: Request, call_next):
+    """Reject oversized bodies before FastAPI parses multipart uploads."""
+    if request.url.path.startswith("/api/"):
+        raw_length = request.headers.get("content-length")
+        if raw_length is not None:
+            try:
+                length = int(raw_length)
+            except ValueError:
+                return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length."})
+            if length > MAX_REQUEST_BYTES:
+                return JSONResponse(status_code=413, content={"detail": "Upload is too large."})
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Add conservative browser hardening headers to every response."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    if request.url.path.startswith("/api"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    if request.url.scheme == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
+
+# Added last so it is the outermost middleware and also decorates early
+# auth/CSRF/body-limit rejections with the right CORS headers. Never combine a
+# wildcard with credentials, so origins must be explicit.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(LimitBodySizeMiddleware, max_bytes=MAX_REQUEST_BYTES)
 
 
 # Create the first admin from ADMIN_USERNAME / ADMIN_PASSWORD on startup.
@@ -136,36 +260,42 @@ def health():
 
 # ------------------------------------------------------------------- auth
 @app.post("/api/auth/login")
-def login(body: LoginRequest, response: Response):
+def login(body: LoginRequest, request: Request, response: Response):
     """Verify credentials and set the session cookie."""
+    client_ip = request.client.host if request.client else "unknown"
+    retry_after = login_throttle.retry_after(client_ip, body.username)
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
     user = user_store.authenticate(body.username, body.password)
     if not user:
+        login_throttle.record_failure(client_ip, body.username)
         raise HTTPException(status_code=401, detail="Invalid username or password.")
-    response.set_cookie(
-        key=COOKIE_NAME,
-        value=make_token(user),
-        max_age=SESSION_DAYS * 24 * 3600,
-        httponly=True,
-        samesite="lax",
-        secure=False,  # set True behind HTTPS in production
-        path="/",
-    )
+    login_throttle.reset(client_ip, body.username)
+    _set_session_cookie(response, request, user)
     return {"user": user}
 
 
 @app.post("/api/auth/logout")
-def logout(response: Response):
+def logout(request: Request, response: Response):
     """Clear the session cookie."""
-    response.delete_cookie(COOKIE_NAME, path="/")
+    response.delete_cookie(
+        COOKIE_NAME,
+        path="/",
+        httponly=True,
+        samesite=cookie_samesite(),
+        secure=cookie_secure(request) or cookie_samesite() == "none",
+    )
     return {"ok": True}
 
 
 @app.get("/api/auth/me")
 def me(request: Request):
     """Return the current user, or 401 when not signed in."""
-    token = request.cookies.get(COOKIE_NAME)
-    payload = decode_token(token) if token else None
-    user = user_store.get(payload.get("sub", "")) if payload else None
+    user = user_from_token(request.cookies.get(COOKIE_NAME))
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return {"user": user}
@@ -198,7 +328,11 @@ def create_user(body: CreateUserRequest, _: dict = Depends(require_admin)):
 
 @app.post("/api/users/{user_id}/password")
 def set_user_password(
-    user_id: str, body: SetPasswordRequest, _: dict = Depends(require_admin)
+    user_id: str,
+    body: SetPasswordRequest,
+    request: Request,
+    response: Response,
+    admin: dict = Depends(require_admin),
 ):
     """Reset a user's password (admin only)."""
     try:
@@ -207,6 +341,10 @@ def set_user_password(
         raise HTTPException(status_code=400, detail=str(e))
     if user is None:
         raise HTTPException(status_code=404, detail="User not found.")
+    # A reset invalidates the target's existing sessions. Keep the admin's own
+    # session alive when they reset their own password.
+    if admin.get("id") == user_id:
+        _set_session_cookie(response, request, user)
     return user
 
 
@@ -390,16 +528,19 @@ async def create_job(
     entry = _user_settings(user)
     provider = get_spec(entry.get("ai_provider")).id
     _require_personal_key(user, provider)
-    job = job_manager.create(
-        files,
-        model=model or entry.get(f"{provider}_model"),
-        include_images=include_images,
-        pattern=pattern,
-        skip_files=_parse_skip_files(skip_files),
-        owner=user.get("id"),
-        api_key=_user_api_key(user, provider),
-        provider=provider,
-    )
+    try:
+        job = job_manager.create(
+            files,
+            model=model or entry.get(f"{provider}_model"),
+            include_images=include_images,
+            pattern=pattern,
+            skip_files=_parse_skip_files(skip_files),
+            owner=user.get("id"),
+            api_key=_user_api_key(user, provider),
+            provider=provider,
+        )
+    except UploadValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return job.to_dict()
 
 
@@ -450,9 +591,12 @@ async def add_job_files(
     # Keep the provider/model the run originally used so merged results match.
     provider = ((job.config or {}).get("provider") or "gemini").lower()
     _require_personal_key(user, provider)
-    job = job_manager.add_and_reprocess(
-        job_id, files, api_key=_user_api_key(user, provider), provider=provider
-    )
+    try:
+        job = job_manager.add_and_reprocess(
+            job_id, files, api_key=_user_api_key(user, provider), provider=provider
+        )
+    except UploadValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
     return job.to_dict()
@@ -537,9 +681,14 @@ def download(job_id: str, user: dict = Depends(current_user)):
 @app.get("/api/suppliers")
 def list_suppliers(scope: str = "mine", user: dict = Depends(current_user)):
     """Return curated suppliers. ``scope=mine`` (default) is your own list (plus
-    shared entries); ``scope=all`` shows every user's suppliers, marked with an
-    ``owner`` so the UI can lock the ones you do not own.
+    shared entries); ``scope=all`` shows every user's suppliers (admin only),
+    marked with an ``owner`` so the UI can lock the ones you do not own.
     """
+    if scope == "all" and user.get("role") != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Admin privileges are required to view every user's suppliers.",
+        )
     scope = "all" if scope == "all" else "mine"
     return {"suppliers": supplier_store.list(owner=user.get("id"), scope=scope)}
 
@@ -588,7 +737,12 @@ if (_DIST / "assets").is_dir():
         """Serve the built SPA; API routes are matched before this fallback."""
         if spa_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not found.")
+        dist_root = _DIST.resolve()
         candidate = (_DIST / spa_path).resolve()
-        if candidate.is_file() and str(candidate).startswith(str(_DIST.resolve())):
+        try:
+            candidate.relative_to(dist_root)
+        except ValueError:
+            return FileResponse(_DIST / "index.html")
+        if candidate.is_file():
             return FileResponse(candidate)
         return FileResponse(_DIST / "index.html")

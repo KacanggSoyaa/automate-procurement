@@ -95,6 +95,14 @@ python cli.py run-all
 | `GEMINI_API_KEY` | yes | https://aistudio.google.com/apikey |
 | `GEMINI_MODEL` | no | defaults to `gemini-3.8-flash` |
 | `RFQ_SIGNATURE` | no | signature block for the quotation email |
+| `AUTH_SECRET` | prod | signs sessions and encrypts saved AI keys; changing it signs everyone out |
+| `ALLOWED_ORIGINS` | prod | comma-separated credentialed CORS origins; wildcards are ignored |
+| `COOKIE_SECURE` | no | auto-detects HTTPS; set `true` when TLS terminates at a proxy |
+| `COOKIE_SAMESITE` | no | `strict` (default), `lax` or `none` |
+| `PASSWORD_MIN_LENGTH` | no | defaults to 8 (cannot be lower) |
+| `MAX_UPLOAD_FILE_MB` | no | per-file limit, default 100 |
+| `MAX_UPLOAD_TOTAL_MB` | no | per-request limit, default 250 |
+| `MAX_UPLOAD_FILES` | no | files per job, default 100 |
 
 Free-tier Gemini quota is ~20 requests/day **per model**. The processor falls back through
 several models and caches results in `data/.ai_cache/`, so repeat runs cost no extra quota.

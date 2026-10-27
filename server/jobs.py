@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 
 from .history import history_store
 from .pipeline import run_pipeline
+from .upload_guard import UploadValidationError, save_uploads
 
 # Where uploaded files and per-job output workspaces are stored.
 UPLOAD_ROOT = Path("./data/uploads")
@@ -116,21 +117,16 @@ class JobManager:
         job_id = uuid.uuid4().hex[:12]
         job = Job(id=job_id, owner=owner)
         upload_dir = UPLOAD_ROOT / job_id
-        upload_dir.mkdir(parents=True, exist_ok=True)
 
-        # Stream each upload to disk in 1MB blocks to handle large files.
-        for f in files:
-            name = Path(f.filename).name
-            if not name:
-                continue
-            dest = upload_dir / name
-            with open(dest, "wb") as out:
-                while True:
-                    chunk = f.file.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    out.write(chunk)
-            job.files.append(name)
+        try:
+            names = save_uploads(files, upload_dir)
+        except Exception:
+            shutil.rmtree(upload_dir, ignore_errors=True)
+            raise
+        if not names:
+            shutil.rmtree(upload_dir, ignore_errors=True)
+            raise UploadValidationError("No files uploaded.")
+        job.files.extend(names)
 
         with self._lock:
             self._jobs[job_id] = job
@@ -224,30 +220,24 @@ class JobManager:
         job = self.get(job_id)
         if job is None:
             return None
-
-        upload_dir = UPLOAD_ROOT / job_id
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        added = 0
-        for f in files:
-            name = Path(f.filename).name
-            if not name:
-                continue
-            dest = upload_dir / name
-            with open(dest, "wb") as out:
-                while True:
-                    chunk = f.file.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    out.write(chunk)
-            if name not in job.files:
-                job.files.append(name)
-            added += 1
-
-        if not added:
-            return job
         # Refuse to stack a second incremental run while one is already going.
         if job.status in ("queued", "running"):
+            raise UploadValidationError(
+                "This run is still processing; wait for it to finish before adding files."
+            )
+
+        upload_dir = UPLOAD_ROOT / job_id
+        names = save_uploads(
+            files, upload_dir, existing_names=job.files, allow_replace=True
+        )
+        added = len(names)
+        if not added:
             return job
+        existing = {name.casefold() for name in job.files}
+        for name in names:
+            if name.casefold() not in existing:
+                job.files.append(name)
+                existing.add(name.casefold())
 
         record = history_store.load(job_id) or {}
         cfg = job.config or (record.get("config") or {})

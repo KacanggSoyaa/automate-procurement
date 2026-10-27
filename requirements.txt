@@ -20,4 +20,5 @@ ddgs>=3.0.0
 jinja2>=3.1.0
 bcrypt>=4.1.0
 PyJWT>=2.8.0
+cryptography>=42.0.0
 

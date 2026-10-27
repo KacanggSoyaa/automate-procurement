@@ -69,6 +69,7 @@ export default function SupplierDirectory({
   const [editDraft, setEditDraft] = useState<SupplierDraft>(EMPTY_DRAFT);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const isAdmin = user?.role === "admin";
 
   const load = async (which: SupplierScope = scope) => {
     setLoading(true);
@@ -82,9 +83,13 @@ export default function SupplierDirectory({
   };
 
   useEffect(() => {
+    if (!isAdmin && scope === "all") {
+      setScope("mine");
+      return;
+    }
     load(scope);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope]);
+  }, [scope, isAdmin]);
 
   /** Whether the current user may edit/delete a supplier entry. */
   const canEdit = (s: SavedSupplier) => !s.owner || s.owner === user?.id;
@@ -214,17 +219,19 @@ export default function SupplierDirectory({
             >
               my list
             </button>
-            <button
-              onClick={() => setScope("all")}
-              title="Show suppliers saved by every user"
-              className={`border-l border-ink-600 px-3 py-2 font-mono text-xs transition ${
-                scope === "all"
-                  ? "bg-amber text-space-950"
-                  : "text-paper-200/60 hover:text-paper-50"
-              }`}
-            >
-              all users
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setScope("all")}
+                title="Show suppliers saved by every user"
+                className={`border-l border-ink-600 px-3 py-2 font-mono text-xs transition ${
+                  scope === "all"
+                    ? "bg-amber text-space-950"
+                    : "text-paper-200/60 hover:text-paper-50"
+                }`}
+              >
+                all users
+              </button>
+            )}
           </div>
           {job?.result?.suppliers?.some((r) => (r.suppliers?.length ?? 0) > 0) && (
             <button
