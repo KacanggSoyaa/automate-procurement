@@ -11,6 +11,7 @@ import {
   renameHistory,
 } from "./api";
 import AddFiles from "./components/AddFiles";
+import AdminHistory from "./components/AdminHistory";
 import AiSettings from "./components/AiSettings";
 import DropZone from "./components/DropZone";
 import HistorySidebar from "./components/HistorySidebar";
@@ -36,13 +37,11 @@ function formatBytes(bytes: number): string {
 const BASE_TABS = [
   { id: "pipeline", label: "pipeline" },
   { id: "directory", label: "supplier list" },
+  { id: "suppliers", label: "supplier search" },
 ] as const;
 
 /** Extra sections that only appear once a saved project is opened. */
-const PROJECT_TABS = [
-  { id: "suppliers", label: "supplier search" },
-  { id: "emails", label: "quotation email" },
-] as const;
+const PROJECT_TABS = [{ id: "emails", label: "quotation email" }] as const;
 
 type TabId =
   | (typeof BASE_TABS)[number]["id"]
@@ -658,6 +657,24 @@ export default function App() {
                 </section>
 
                 <UsersAdmin currentUser={user} onError={(msg) => setError(msg)} />
+
+                <section className="mt-12">
+                  <section className="pb-6 pt-6">
+                    <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">
+                      Admin — User history
+                    </p>
+                    <h2 className="mt-3 font-mono text-2xl font-semibold leading-tight text-paper-50 sm:text-3xl">
+                      Every run, every user.
+                    </h2>
+                    <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
+                      This is the activity of every account on the server, grouped by user. It is
+                      kept separate from your own history rail, which only ever shows the runs of
+                      the account you are signed in as.
+                    </p>
+                  </section>
+
+                  <AdminHistory onError={(msg) => setError(msg)} />
+                </section>
               </section>
             )}
           </section>

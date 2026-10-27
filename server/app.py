@@ -1,7 +1,7 @@
 """FastAPI backend for the Automate Procurement web UI."""
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 try:
     from dotenv import load_dotenv
@@ -13,6 +13,7 @@ except ImportError:
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .ai_providers import PROVIDERS, get_spec, provider_label
@@ -219,6 +220,34 @@ def delete_user(user_id: str, admin: dict = Depends(require_admin)):
     return {"ok": True, "id": user_id}
 
 
+@app.get("/api/admin/history")
+def list_all_history(_: dict = Depends(require_admin)):
+    """Every user's saved runs, grouped by owner (admin only).
+
+    This is the admin's view of user activity and is kept apart from the
+    admin's own history list, which stays scoped to the signed-in account.
+    """
+    users = {u["id"]: u for u in user_store.list()}
+    owners: List[dict] = []
+    by_owner: Dict[str, List[dict]] = {}
+    for entry in job_manager.history(None):
+        owner_id = entry.get("owner") or ""
+        by_owner.setdefault(owner_id, []).append(entry)
+
+    for owner_id, entries in by_owner.items():
+        user = users.get(owner_id)
+        owners.append({
+            "owner_id": owner_id,
+            "username": (user or {}).get("username") or "legacy",
+            "display_name": (user or {}).get("display_name")
+            or ("" if user else "Legacy runs (no owner)"),
+            "role": (user or {}).get("role") or "",
+            "jobs": entries,
+        })
+    owners.sort(key=lambda o: o["username"].lower())
+    return {"owners": owners}
+
+
 
 @app.get("/api/quota")
 def get_quota():
@@ -382,8 +411,12 @@ def get_job(job_id: str, user: dict = Depends(current_user)):
 
 @app.get("/api/history")
 def list_history(user: dict = Depends(current_user)):
-    """Return the saved history of finished ITB runs the caller owns, newest first."""
-    return {"jobs": job_manager.history(_owner_scope(user))}
+    """Return the saved history of the signed-in account, newest first.
+
+    Admins see only their own runs here; every account's runs are listed
+    separately in the admin-only ``/api/admin/history`` view.
+    """
+    return {"jobs": job_manager.history(user.get("id"))}
 
 
 @app.delete("/api/history/{job_id}")
@@ -538,6 +571,24 @@ def update_supplier(supplier_id: str, body: SupplierPayload, user: dict = Depend
 @app.delete("/api/suppliers/{supplier_id}")
 def delete_supplier(supplier_id: str, user: dict = Depends(current_user)):
     """Remove one supplier from the master list (only if you own it)."""
-    if not supplier_store.delete(supplier_id, owner=user.get("id")):
+    if supplier_store.delete(supplier_id, owner=user.get("id")) is None:
         raise HTTPException(status_code=404, detail="Supplier not found.")
     return {"ok": True, "id": supplier_id}
+
+
+# -- built frontend (single origin) -------------------------------------------
+# Serving the compiled React app from the same origin keeps its /api calls
+# relative, so the whole app can run behind one port (or one tunnel URL).
+_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
+if (_DIST / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_DIST / "assets")), name="assets")
+
+    @app.get("/{spa_path:path}", include_in_schema=False)
+    def serve_spa(spa_path: str):
+        """Serve the built SPA; API routes are matched before this fallback."""
+        if spa_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found.")
+        candidate = (_DIST / spa_path).resolve()
+        if candidate.is_file() and str(candidate).startswith(str(_DIST.resolve())):
+            return FileResponse(candidate)
+        return FileResponse(_DIST / "index.html")

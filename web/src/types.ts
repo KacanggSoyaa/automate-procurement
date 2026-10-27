@@ -162,6 +162,15 @@ export interface HistoryItem {
   buyer?: string | null;
 }
 
+/** One user's saved runs, as listed in the admin's user-activity view. */
+export interface AdminHistoryOwner {
+  owner_id: string;
+  username: string;
+  display_name: string;
+  role: string;
+  jobs: HistoryItem[];
+}
+
 /** An authenticated account (admin-created). */
 export interface AuthUser {
   id: string;

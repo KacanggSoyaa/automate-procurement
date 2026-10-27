@@ -1,4 +1,5 @@
 import type {
+  AdminHistoryOwner,
   AiSettings,
   AuthUser,
   HistoryItem,
@@ -144,6 +145,16 @@ export async function renameHistory(id: string, title: string): Promise<HistoryI
     throw new Error(`Failed to rename history entry (${res.status})`);
   }
   return (await res.json()) as HistoryItem;
+}
+
+/** Every user's saved runs, grouped by owner (admin only). */
+export async function listAllHistory(): Promise<AdminHistoryOwner[]> {
+  const res = await request(`${BASE}/admin/history`);
+  if (!res.ok) {
+    throw new Error(`Failed to load user history (${res.status})`);
+  }
+  const data = (await res.json()) as { owners: AdminHistoryOwner[] };
+  return data.owners ?? [];
 }
 
 /* ---------------------------------------------------------- supplier list */
