@@ -33,7 +33,7 @@ from .auth import (
 )
 from .jobs import JobEditError, job_manager
 from .supplier_store import supplier_store
-from .suppliers import quota_status, supplier_finder
+from .suppliers import SupplierFinder, quota_status, supplier_finder
 from .upload_guard import MAX_REQUEST_BYTES, UploadValidationError
 
 
@@ -101,6 +101,12 @@ class SupplierPayload(BaseModel):
 class SupplierImportRequest(BaseModel):
     """Bulk-add a list of suppliers (e.g. one run's shortlist) to the directory."""
     suppliers: List[SupplierPayload] = []
+
+
+class SupplierSearchRequest(BaseModel):
+    """Body for a standalone supplier search by item name."""
+    name: str = Field(..., min_length=1, max_length=500)
+    description: Optional[str] = Field("", max_length=2000)
 
 _DEFAULT_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -767,6 +773,35 @@ def delete_supplier(supplier_id: str, user: dict = Depends(current_user)):
     if supplier_store.delete(supplier_id, owner=user.get("id")) is None:
         raise HTTPException(status_code=404, detail="Supplier not found.")
     return {"ok": True, "id": supplier_id}
+
+
+@app.post("/api/suppliers/search")
+def search_suppliers_by_name(body: SupplierSearchRequest, user: dict = Depends(current_user)):
+    """Find suppliers for a single item given only its name (and optional description)."""
+    entry = _user_settings(user)
+    if entry.get("supplier_search_provider", True):
+        provider = get_spec(entry.get("ai_provider")).id
+    else:
+        provider = "gemini"
+    _require_personal_key(user, provider)
+    try:
+        finder = SupplierFinder(
+            provider=provider,
+            model=entry.get(f"{provider}_model"),
+            api_key=_user_api_key(user, provider),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    item = {"item_name": body.name.strip(), "description": (body.description or "").strip()}
+    try:
+        found, backend = finder.find_for_item(item)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)[:300])
+    return {
+        "item_name": item["item_name"],
+        "suppliers": found,
+        "backend": backend,
+    }
 
 
 # -- built frontend (single origin) -------------------------------------------

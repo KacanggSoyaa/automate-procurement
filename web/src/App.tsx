@@ -21,6 +21,7 @@ import Results from "./components/Results";
 import RfqEmails from "./components/RfqEmails";
 import SettingsPanel, { parseSkipList } from "./components/SettingsPanel";
 import SupplierDirectory from "./components/SupplierDirectory";
+import QuickSupplierSearch from "./components/QuickSupplierSearch";
 import SupplierPanel from "./components/SupplierPanel";
 import UsersAdmin from "./components/UsersAdmin";
 import VersionsAudit from "./components/VersionsAudit";
@@ -38,6 +39,7 @@ const BASE_TABS = [
   { id: "pipeline", label: "pipeline" },
   { id: "directory", label: "supplier list" },
   { id: "suppliers", label: "supplier search" },
+  { id: "quicksearch", label: "supplier by name" },
 ] as const;
 
 /** Extra sections that only appear once a saved project is opened. */
@@ -104,7 +106,7 @@ export default function App() {
   }, [user, activeProvider]);
   const needsSetup = !!user && missingProviders.length > 0;
   // Reading saved suppliers needs no AI key; only AI work (jobs/search) does.
-  const canBrowseWithoutKey = tab === "directory" || tab === "suppliers";
+  const canBrowseWithoutKey = tab === "directory" || tab === "suppliers" || tab === "quicksearch";
 
   /** Reload the saved-run history from the backend. */
   const loadHistory = useCallback(async () => {
@@ -616,7 +618,22 @@ export default function App() {
             )}
           </section>
 
-          {/* ── 05 · settings (per-user AI provider/key/model, admin: users) ── */}
+            {/* ── 05 · supplier by name (standalone) ─────────────────────── */}
+            <section className={tab === "quicksearch" ? "" : "hidden"}>
+              <section className="pb-8 pt-6">
+                <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Standalone — Supplier By Name</p>
+                <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
+                  Find suppliers by item name.
+                </h1>
+                <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
+                  Insert only the item name; the system searches the web and returns suppliers with websites,
+                  contacts and emails. Save any result to your supplier list.
+                </p>
+              </section>
+              <QuickSupplierSearch onError={(msg) => setError(msg)} />
+            </section>
+
+            {/* ── 06 · settings (per-user AI provider/key/model, admin: users) ── */}
           <section className={tab === "settings" ? "" : "hidden"}>
             <section className="pb-8 pt-6">
               <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Settings — AI</p>

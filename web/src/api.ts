@@ -152,6 +152,23 @@ export function suppliersCsvUrl(id: string): string {
   return `${BASE}/jobs/${id}/suppliers/download.csv`;
 }
 
+/** Find suppliers for a single item given only its name. */
+export async function searchSuppliersByName(
+  name: string,
+  description: string = "",
+): Promise<{ item_name: string; suppliers: import("./types").Supplier[]; backend: string | null }> {
+  const res = await request(`${BASE}/suppliers/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, description }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || `Supplier search failed (${res.status})`);
+  }
+  return (await res.json()) as { item_name: string; suppliers: import("./types").Supplier[]; backend: string | null };
+}
+
 /** Fetch the Google-Search grounding quota state for the header. */
 export async function getQuotaStatus(): Promise<QuotaStatus> {
   const res = await request(`${BASE}/quota`);
