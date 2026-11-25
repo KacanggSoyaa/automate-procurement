@@ -94,10 +94,19 @@ export default function SupplierDirectory({
   /** Whether the current user may edit/delete a supplier entry. */
   const canEdit = (s: SavedSupplier) => !s.owner || s.owner === user?.id;
 
-  const filtered = useMemo(
-    () => items.filter((s) => matches(s, query.trim().toLowerCase())),
-    [items, query],
-  );
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return items
+      .filter((s) => matches(s, q))
+      .sort((a, b) => {
+        const an = a.company_name?.trim() ?? "";
+        const bn = b.company_name?.trim() ?? "";
+        if (!an && !bn) return 0;
+        if (!an) return 1;
+        if (!bn) return -1;
+        return an.localeCompare(bn, undefined, { sensitivity: "base", numeric: true });
+      });
+  }, [items, query]);
 
   const flash = (msg: string) => {
     setNotice(msg);

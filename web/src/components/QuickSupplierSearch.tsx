@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createSupplier, searchSuppliersByName } from "../api";
 import type { Supplier } from "../types";
+import SupplierResultRow from "./SupplierResultRow";
 
 export default function QuickSupplierSearch({ onError }: { onError: (msg: string) => void }) {
   const [name, setName] = useState("");
@@ -76,56 +77,14 @@ export default function QuickSupplierSearch({ onError }: { onError: (msg: string
       </form>
 
       {suppliers.length > 0 && (
-        <ul className="mt-5 divide-y divide-ink-800">
+        <ul className="mt-5 space-y-2 lg:space-y-0 lg:divide-y lg:divide-ink-800">
           {suppliers.map((s, i) => (
-            <li key={i} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 font-mono text-xs">
-              <span className="w-52 shrink-0 truncate text-paper-50" title={s.company_name}>
-                {s.company_name}
-              </span>
-              {s.website ? (
-                <a
-                  href={s.website.startsWith("http") ? s.website : `https://${s.website}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-48 shrink-0 truncate text-amber/80 underline-offset-2 hover:underline"
-                >
-                  {s.website.replace(/^https?:\/\//, "")}
-                </a>
-              ) : (
-                <span className="w-48 shrink-0 truncate text-paper-200/30">—</span>
-              )}
-              {s.email ? (
-                <a href={`mailto:${s.email}`} className="w-52 shrink-0 truncate text-paper-200/80">
-                  {s.email}
-                </a>
-              ) : (
-                <span className="w-52 shrink-0 truncate text-paper-200/30">
-                  {s.contact ? s.contact : "— verify before use"}
-                </span>
-              )}
-              {s.source && (
-                <a
-                  href={s.source}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="ml-auto shrink-0 text-[10px] text-paper-200/40 underline-offset-2 hover:text-amber hover:underline"
-                >
-                  source ›
-                </a>
-              )}
-              <button
-                onClick={() => save(i, s)}
-                disabled={savedKeys.has(i)}
-                className={[
-                  "shrink-0 rounded border px-2 py-0.5 font-mono text-[10px] transition",
-                  savedKeys.has(i)
-                    ? "border-teal/40 text-teal"
-                    : "border-ink-600 text-paper-200/50 hover:border-amber/50 hover:text-amber",
-                ].join(" ")}
-              >
-                {savedKeys.has(i) ? "saved ✓" : "+ list"}
-              </button>
-            </li>
+            <SupplierResultRow
+              key={i}
+              supplier={s}
+              saved={savedKeys.has(i)}
+              onSave={() => save(i, s)}
+            />
           ))}
         </ul>
       )}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AuthError,
   createJob,
@@ -64,6 +64,7 @@ export default function App() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const mainRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [includeImages, setIncludeImages] = useState(true);
@@ -80,9 +81,14 @@ export default function App() {
     { id: "settings", label: "settings", icon: "settings" },
   ];
 
+  const resetScroll = () => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+  };
+
   const handleTabChange = (next: TabId) => {
     setTab(next);
     setSidebarOpen(false);
+    resetScroll();
   };
 
   // Total size of the selected files, shown in the file summary bar.
@@ -320,7 +326,7 @@ export default function App() {
         onRename={renameRun}
       />
 
-      <div className="min-w-0 flex-1 overflow-y-auto overscroll-contain">
+      <div ref={mainRef} className="min-w-0 flex-1 overflow-y-auto overscroll-contain">
         <header className="sticky top-0 z-30 border-b border-ink-800/80 bg-space-950/45 backdrop-blur-xl">
           <div className="mx-auto flex h-16 max-w-4xl items-center justify-between gap-4 px-6">
             <div className="flex min-w-0 items-center gap-3 font-mono text-sm">
@@ -527,6 +533,7 @@ export default function App() {
               onError={(msg) => setError(msg)}
               onUpdated={setJob}
               onOpenSettings={() => handleTabChange("settings")}
+              onViewChange={resetScroll}
             />
           </section>
 

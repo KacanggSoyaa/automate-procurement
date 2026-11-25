@@ -159,26 +159,41 @@ export default function UsersAdmin({
       {loading ? (
         <p className="mt-4 font-mono text-xs text-paper-200/40">loading…</p>
       ) : (
-        <ul className="mt-4 divide-y divide-ink-800">
+        <ul className="mt-4 space-y-2 lg:space-y-0 lg:divide-y lg:divide-ink-800">
           {users.map((u) => (
-            <li key={u.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 font-mono text-xs">
-              <span className="w-40 shrink-0 truncate text-paper-50" title={u.username}>
-                {u.username}
-              </span>
-              <span className="w-40 shrink-0 truncate text-paper-200/60" title={u.display_name}>
-                {u.display_name || "—"}
-              </span>
-              <span
-                className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${
-                  u.role === "admin" ? "border-amber/40 text-amber" : "border-ink-600 text-paper-200/50"
-                }`}
-              >
-                {u.role}
-              </span>
-              {u.id === currentUser.id && (
-                <span className="text-[10px] text-teal">you</span>
-              )}
-              <span className="ml-auto flex shrink-0 items-center gap-1">
+            <li
+              key={u.id}
+              className="grid grid-cols-1 gap-2 rounded-lg border border-ink-800/70 bg-ink-900/40 p-3 font-mono text-xs lg:grid-cols-[minmax(0,8rem)_minmax(0,8rem)_auto_auto] lg:items-center lg:gap-3 lg:border-0 lg:bg-transparent lg:p-0 lg:py-3"
+            >
+              <div className="min-w-0">
+                <p className="mb-0.5 text-[9px] uppercase tracking-wide text-paper-200/35 lg:hidden">
+                  username
+                </p>
+                <span className="block truncate text-paper-50" title={u.username}>
+                  {u.username}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="mb-0.5 text-[9px] uppercase tracking-wide text-paper-200/35 lg:hidden">
+                  display name
+                </p>
+                <span className="block truncate text-paper-200/60" title={u.display_name}>
+                  {u.display_name || "—"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${
+                    u.role === "admin"
+                      ? "border-amber/40 text-amber"
+                      : "border-ink-600 text-paper-200/50"
+                  }`}
+                >
+                  {u.role}
+                </span>
+                {u.id === currentUser.id && <span className="text-[10px] text-teal">you</span>}
+              </div>
+              <div className="flex flex-wrap items-center gap-1 lg:ml-auto lg:justify-end">
                 <button
                   onClick={() => resetPassword(u)}
                   disabled={busyId === u.id}
@@ -194,7 +209,7 @@ export default function UsersAdmin({
                 >
                   delete
                 </button>
-              </span>
+              </div>
             </li>
           ))}
         </ul>

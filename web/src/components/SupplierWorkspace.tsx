@@ -14,6 +14,7 @@ interface Props {
   onError: (message: string) => void;
   onUpdated: (job: Job) => void;
   onOpenSettings: () => void;
+  onViewChange?: () => void;
 }
 
 const VIEWS: { id: SupplierView; label: string; icon: IconName }[] = [
@@ -29,9 +30,15 @@ export default function SupplierWorkspace({
   onError,
   onUpdated,
   onOpenSettings,
+  onViewChange,
 }: Props) {
   const [view, setView] = useState<SupplierView>("directory");
   const done = job?.status === "done";
+
+  const selectView = (next: SupplierView) => {
+    setView(next);
+    onViewChange?.();
+  };
 
   return (
     <section>
@@ -60,7 +67,7 @@ export default function SupplierWorkspace({
               key={item.id}
               role="tab"
               aria-selected={active}
-              onClick={() => setView(item.id)}
+              onClick={() => selectView(item.id)}
               className={[
                 "flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 font-mono text-xs uppercase tracking-wider transition",
                 "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/70",

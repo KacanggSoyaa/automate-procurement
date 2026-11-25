@@ -173,16 +173,19 @@ export default function Results({
         </p>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-ink-700">
+      <p className="mb-2 flex items-center gap-1 font-mono text-[10px] uppercase tracking-wide text-paper-200/40 lg:hidden">
+        swipe table <span className="text-amber">→</span>
+      </p>
+      <div className="overflow-x-auto rounded-xl border border-ink-700 scrollbar-thin">
         <table className="w-full min-w-[740px] border-collapse text-left">
           <thead>
             <tr className="bg-ink-800 font-mono text-[11px] uppercase tracking-wide text-paper-200/60">
-              <th className="px-3 py-2">No.</th>
-              <th className="px-3 py-2">Item Name</th>
-              <th className="px-3 py-2">Item No.</th>
-              <th className="px-3 py-2">Qty</th>
-              <th className="px-3 py-2">UOM</th>
-              <th className="px-3 py-2 text-right">Actions</th>
+              <th scope="col" className="px-3 py-2">No.</th>
+              <th scope="col" className="px-3 py-2">Item Name</th>
+              <th scope="col" className="px-3 py-2">Item No.</th>
+              <th scope="col" className="px-3 py-2">Qty</th>
+              <th scope="col" className="px-3 py-2">UOM</th>
+              <th scope="col" className="px-3 py-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
