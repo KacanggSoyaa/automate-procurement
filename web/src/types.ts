@@ -1,10 +1,4 @@
-export type TabId =
-  | "pipeline"
-  | "directory"
-  | "suppliers"
-  | "quicksearch"
-  | "emails"
-  | "settings";
+export type TabId = "pipeline" | "suppliers" | "emails" | "settings";
 
 /** A single technical specification (parameter -> value) for an item. */
 export interface SpecPair {

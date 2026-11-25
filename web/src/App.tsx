@@ -22,9 +22,7 @@ import Login from "./components/Login";
 import Results from "./components/Results";
 import RfqEmails from "./components/RfqEmails";
 import SettingsPanel, { parseSkipList } from "./components/SettingsPanel";
-import SupplierDirectory from "./components/SupplierDirectory";
-import QuickSupplierSearch from "./components/QuickSupplierSearch";
-import SupplierPanel from "./components/SupplierPanel";
+import SupplierWorkspace from "./components/SupplierWorkspace";
 import UsersAdmin from "./components/UsersAdmin";
 import VersionsAudit from "./components/VersionsAudit";
 import type { AuthUser, HistoryItem, Job, QuotaStatus, TabId } from "./types";
@@ -39,12 +37,10 @@ function formatBytes(bytes: number): string {
 /** Sections always shown on the homepage. */
 const BASE_TABS: NavTab[] = [
   { id: "pipeline", label: "pipeline", icon: "pipeline" },
-  { id: "directory", label: "supplier list", icon: "directory" },
-  { id: "suppliers", label: "supplier search", icon: "suppliers" },
-  { id: "quicksearch", label: "supplier by name", icon: "quicksearch" },
+  { id: "suppliers", label: "suppliers", icon: "suppliers" },
 ];
 
-/** Extra sections that only appear once a saved project is opened. */
+/** Extra sections that appear once a project run exists. */
 const PROJECT_TABS: NavTab[] = [{ id: "emails", label: "quotation email", icon: "email" }];
 
 /** Human labels for AI providers, used by the API-key setup wall. */
@@ -74,15 +70,13 @@ export default function App() {
   const [skipFiles, setSkipFiles] = useState("");
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const [tab, setTab] = useState<TabId>("pipeline");
-  // When a saved project is opened from history, reveal the extra navbar
-  // sections (supplier search, quotation email) and the per-run panels.
-  const [projectView, setProjectView] = useState(false);
+  const hasProject = job !== null;
 
   // Tabs shown in the sidebar: the homepage sections, the project-only section
-  // when a saved project is open, and settings.
+  // when a run exists, and settings.
   const tabs: NavTab[] = [
     ...BASE_TABS,
-    ...(projectView ? PROJECT_TABS : []),
+    ...(hasProject ? PROJECT_TABS : []),
     { id: "settings", label: "settings", icon: "settings" },
   ];
 
@@ -108,7 +102,7 @@ export default function App() {
   }, [user, activeProvider]);
   const needsSetup = !!user && missingProviders.length > 0;
   // Reading saved suppliers needs no AI key; only AI work (jobs/search) does.
-  const canBrowseWithoutKey = tab === "directory" || tab === "suppliers" || tab === "quicksearch";
+  const canBrowseWithoutKey = tab === "suppliers";
 
   /** Reload the saved-run history from the backend. */
   const loadHistory = useCallback(async () => {
@@ -220,7 +214,6 @@ export default function App() {
     setBusy(true);
     setError(null);
     setJob(null);
-    setProjectView(false);
     try {
       const j = await createJob(files, { includeImages, skipFiles: parseSkipList(skipFiles) });
       setJob(j);
@@ -239,7 +232,6 @@ export default function App() {
     setSidebarOpen(false);
     try {
       setJob(await getJob(id));
-      setProjectView(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -279,7 +271,6 @@ export default function App() {
     setError(null);
     setSkipFiles("");
     setSidebarOpen(false);
-    setProjectView(false);
     handleTabChange("pipeline");
   };
 
@@ -294,7 +285,6 @@ export default function App() {
     setHistory([]);
     setJob(null);
     setFiles([]);
-    setProjectView(false);
     handleTabChange("pipeline");
   };
 
@@ -313,7 +303,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen bg-grid">
+    <div className="flex h-screen overflow-hidden bg-grid">
       <AppSidebar
         navTabs={tabs}
         activeTab={tab}
@@ -330,7 +320,7 @@ export default function App() {
         onRename={renameRun}
       />
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-y-auto overscroll-contain">
         <header className="sticky top-0 z-30 border-b border-ink-800/80 bg-space-950/45 backdrop-blur-xl">
           <div className="mx-auto flex h-16 max-w-4xl items-center justify-between gap-4 px-6">
             <div className="flex min-w-0 items-center gap-3 font-mono text-sm">
@@ -528,58 +518,16 @@ export default function App() {
             )}
           </section>
 
-          {/* ── 02 · supplier list (master directory) ───────────────────── */}
-          <section className={tab === "directory" ? "" : "hidden"}>
-            <section className="pb-8 pt-6">
-              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Section 02 / 02 — Supplier List</p>
-              <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
-                Your supplier directory.
-              </h1>
-              <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
-                Add suppliers by hand or import a run's shortlist. This master list is saved on the
-                server and stays available for every future ITB, no matter which run you have open.
-              </p>
-            </section>
-
-            <SupplierDirectory job={job} user={user} onError={(msg) => setError(msg)} />
-          </section>
-
-          {/* ── 03 · supplier search (project) ──────────────────────────── */}
+          {/* ── 02 · supplier workspace ─────────────────────────────────── */}
           <section className={tab === "suppliers" ? "" : "hidden"}>
-            <section className="pb-8 pt-6">
-              <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Project — Supplier Search</p>
-              <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
-                Shortlist suppliers.
-              </h1>
-              <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
-                Run a live web search per line item (or one shared list for everything) to find vendors,
-                websites and contact emails. Export the shortlist as a CSV when you are done.
-              </p>
-            </section>
-
-            {done ? (
-              <div className="space-y-4">
-                {needsSetup && (
-                  <div className="rounded-xl border border-amber/30 bg-amber/5 p-4 font-mono text-xs text-amber/80">
-                    You can review this project's suppliers now. Add your API key in{" "}
-                    <button
-                      onClick={() => handleTabChange("settings")}
-                      className="underline decoration-amber/40 underline-offset-2 hover:text-amber"
-                    >
-                      settings
-                    </button>{" "}
-                    to run new searches.
-                  </div>
-                )}
-                <SupplierPanel job={job} onError={(msg) => setError(msg)} onUpdated={setJob} />
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-dashed border-ink-700 bg-ink-900/40 p-8 text-center">
-                <p className="font-mono text-xs text-paper-200/50">
-                  This project's pipeline must be finished before supplier search unlocks.
-                </p>
-              </div>
-            )}
+            <SupplierWorkspace
+              job={job}
+              user={user}
+              needsSetup={needsSetup}
+              onError={(msg) => setError(msg)}
+              onUpdated={setJob}
+              onOpenSettings={() => handleTabChange("settings")}
+            />
           </section>
 
           {/* ── 04 · quotation email (project) ──────────────────────────── */}
@@ -605,21 +553,6 @@ export default function App() {
               </div>
             )}
           </section>
-
-            {/* ── 05 · supplier by name (standalone) ─────────────────────── */}
-            <section className={tab === "quicksearch" ? "" : "hidden"}>
-              <section className="pb-8 pt-6">
-                <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber/80">Standalone — Supplier By Name</p>
-                <h1 className="mt-3 font-mono text-3xl font-semibold leading-tight text-paper-50 sm:text-4xl">
-                  Find suppliers by item name.
-                </h1>
-                <p className="mt-4 max-w-2xl font-sans text-sm leading-relaxed text-paper-200/70">
-                  Insert only the item name; the system searches the web and returns suppliers with websites,
-                  contacts and emails. Save any result to your supplier list.
-                </p>
-              </section>
-              <QuickSupplierSearch onError={(msg) => setError(msg)} />
-            </section>
 
             {/* ── 06 · settings (per-user AI provider/key/model, admin: users) ── */}
           <section className={tab === "settings" ? "" : "hidden"}>

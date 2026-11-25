@@ -171,7 +171,7 @@ export default function AppSidebar({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin">
           <div className={collapsed ? "md:hidden" : ""}>
             <div className="px-2 pt-4">
               <p className="mb-2 px-2 font-mono text-[10px] uppercase tracking-[0.22em] text-paper-200/35">
