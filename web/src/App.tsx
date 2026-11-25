@@ -13,9 +13,11 @@ import {
 import AddFiles from "./components/AddFiles";
 import AdminHistory from "./components/AdminHistory";
 import AiSettings from "./components/AiSettings";
+import AppSidebar, { type NavTab } from "./components/AppSidebar";
 import DropZone from "./components/DropZone";
-import HistorySidebar from "./components/HistorySidebar";
+import Icon from "./components/Icon";
 import JobPanel from "./components/JobPanel";
+import LiveClock from "./components/LiveClock";
 import Login from "./components/Login";
 import Results from "./components/Results";
 import RfqEmails from "./components/RfqEmails";
@@ -25,7 +27,7 @@ import QuickSupplierSearch from "./components/QuickSupplierSearch";
 import SupplierPanel from "./components/SupplierPanel";
 import UsersAdmin from "./components/UsersAdmin";
 import VersionsAudit from "./components/VersionsAudit";
-import type { AuthUser, HistoryItem, Job, QuotaStatus } from "./types";
+import type { AuthUser, HistoryItem, Job, QuotaStatus, TabId } from "./types";
 
 /** Format a byte count as a short human-readable string (B / KB / MB). */
 function formatBytes(bytes: number): string {
@@ -35,20 +37,15 @@ function formatBytes(bytes: number): string {
 }
 
 /** Sections always shown on the homepage. */
-const BASE_TABS = [
-  { id: "pipeline", label: "pipeline" },
-  { id: "directory", label: "supplier list" },
-  { id: "suppliers", label: "supplier search" },
-  { id: "quicksearch", label: "supplier by name" },
-] as const;
+const BASE_TABS: NavTab[] = [
+  { id: "pipeline", label: "pipeline", icon: "pipeline" },
+  { id: "directory", label: "supplier list", icon: "directory" },
+  { id: "suppliers", label: "supplier search", icon: "suppliers" },
+  { id: "quicksearch", label: "supplier by name", icon: "quicksearch" },
+];
 
 /** Extra sections that only appear once a saved project is opened. */
-const PROJECT_TABS = [{ id: "emails", label: "quotation email" }] as const;
-
-type TabId =
-  | (typeof BASE_TABS)[number]["id"]
-  | (typeof PROJECT_TABS)[number]["id"]
-  | "settings";
+const PROJECT_TABS: NavTab[] = [{ id: "emails", label: "quotation email", icon: "email" }];
 
 /** Human labels for AI providers, used by the API-key setup wall. */
 const PROVIDER_LABELS: Record<string, string> = {
@@ -81,13 +78,18 @@ export default function App() {
   // sections (supplier search, quotation email) and the per-run panels.
   const [projectView, setProjectView] = useState(false);
 
-  // Tabs shown in the navbar: the two homepage sections, plus the project-only
-  // sections when a saved project is open, plus the admin-only users section.
-  const tabs = [
+  // Tabs shown in the sidebar: the homepage sections, the project-only section
+  // when a saved project is open, and settings.
+  const tabs: NavTab[] = [
     ...BASE_TABS,
     ...(projectView ? PROJECT_TABS : []),
-    { id: "settings", label: "settings" } as const,
+    { id: "settings", label: "settings", icon: "settings" },
   ];
+
+  const handleTabChange = (next: TabId) => {
+    setTab(next);
+    setSidebarOpen(false);
+  };
 
   // Total size of the selected files, shown in the file summary bar.
   const totalSize = useMemo(() => files.reduce((sum, f) => sum + f.size, 0), [files]);
@@ -278,7 +280,7 @@ export default function App() {
     setSkipFiles("");
     setSidebarOpen(false);
     setProjectView(false);
-    setTab("pipeline");
+    handleTabChange("pipeline");
   };
 
   /** Sign out: clear the session cookie and reset app state. */
@@ -293,7 +295,7 @@ export default function App() {
     setJob(null);
     setFiles([]);
     setProjectView(false);
-    setTab("pipeline");
+    handleTabChange("pipeline");
   };
 
   const done = job?.status === "done";
@@ -312,7 +314,10 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen bg-grid">
-      <HistorySidebar
+      <AppSidebar
+        navTabs={tabs}
+        activeTab={tab}
+        onTabChange={handleTabChange}
         items={history}
         activeId={job?.id ?? null}
         loading={historyLoading}
@@ -326,30 +331,30 @@ export default function App() {
       />
 
       <div className="min-w-0 flex-1">
-        {/* Top navbar: brand, section tabs and live quota badge. */}
         <header className="sticky top-0 z-30 border-b border-ink-800/80 bg-space-950/45 backdrop-blur-xl">
-          <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-6 pt-3">
-            <div className="flex items-center gap-3 font-mono text-sm">
+          <div className="mx-auto flex h-16 max-w-4xl items-center justify-between gap-4 px-6">
+            <div className="flex min-w-0 items-center gap-3 font-mono text-sm">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="flex h-7 w-7 items-center justify-center rounded border border-ink-700 text-paper-200/60 transition hover:border-amber/50 hover:text-amber md:hidden"
-                title="Open history"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-ink-700 text-paper-200/60 transition hover:border-amber/50 hover:text-amber focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/70 md:hidden"
+                title="Open navigation"
+                aria-label="Open navigation"
+                aria-expanded={sidebarOpen}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M3 6h18M3 12h18M3 18h18" />
-                </svg>
+                <Icon name="menu" size={15} />
               </button>
               <span className="text-amber">▮</span>
               <span className="font-semibold tracking-tight text-paper-50">automate</span>
               <span className="text-paper-200/40">//</span>
-              <span className="text-paper-200/70">procurement</span>
+              <span className="truncate text-paper-200/70">procurement</span>
             </div>
-            <div className="flex items-center gap-2 font-mono text-[11px] text-paper-200/50">
+            <div className="flex shrink-0 items-center gap-2 font-mono text-[11px] text-paper-200/50">
               <span className="hidden items-center gap-1.5 sm:flex">
                 <span className="h-1.5 w-1.5 rounded-full bg-teal animate-pulse-dot" />
                 ai vision pipeline
                 <span className="text-paper-200/25">·</span>
               </span>
+              <LiveClock />
               <a
                 href={quota?.link ?? "https://ai.dev/rate-limit"}
                 target="_blank"
@@ -378,7 +383,7 @@ export default function App() {
                     ? "not checked"
                     : quota.state}
               </a>
-              <span className="text-paper-200/25">·</span>
+              <span className="hidden text-paper-200/25 sm:inline">·</span>
               <span
                 className="hidden max-w-[160px] truncate text-paper-200/70 sm:inline"
                 title={`${user.display_name || user.username} (${user.role})`}
@@ -388,32 +393,15 @@ export default function App() {
               </span>
               <button
                 onClick={signOut}
-                className="rounded border border-ink-700 px-2 py-0.5 transition hover:border-danger/50 hover:text-danger"
+                className="flex items-center gap-1.5 rounded border border-ink-700 px-2 py-1 transition hover:border-danger/50 hover:text-danger focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/70"
                 title="Sign out"
+                aria-label="Sign out"
               >
-                sign out
+                <Icon name="logout" size={12} />
+                <span className="hidden sm:inline">sign out</span>
               </button>
             </div>
           </div>
-
-          <nav className="mx-auto max-w-4xl px-6">
-            <ul className="-mb-px flex gap-6 overflow-x-auto font-mono text-xs uppercase tracking-widest">
-              {tabs.map((t) => (
-                <li key={t.id}>
-                  <button
-                    onClick={() => setTab(t.id)}
-                    className={`flex items-center gap-1.5 border-b-2 py-3 transition ${
-                      tab === t.id
-                        ? "border-amber text-amber"
-                        : "border-transparent text-paper-200/50 hover:text-paper-100"
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </nav>
         </header>
 
         <div className="mx-auto max-w-4xl px-6 py-10">
@@ -441,7 +429,7 @@ export default function App() {
                 .
               </p>
               <button
-                onClick={() => setTab("settings")}
+                onClick={() => handleTabChange("settings")}
                 className="mt-5 rounded-lg bg-amber px-5 py-2.5 font-mono text-sm font-semibold text-space-950 transition hover:bg-amber-light"
               >
                 GO TO SETTINGS
@@ -575,7 +563,7 @@ export default function App() {
                   <div className="rounded-xl border border-amber/30 bg-amber/5 p-4 font-mono text-xs text-amber/80">
                     You can review this project's suppliers now. Add your API key in{" "}
                     <button
-                      onClick={() => setTab("settings")}
+                      onClick={() => handleTabChange("settings")}
                       className="underline decoration-amber/40 underline-offset-2 hover:text-amber"
                     >
                       settings

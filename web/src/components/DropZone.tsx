@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import Icon from "./Icon";
 
 // File types accepted by the drop zone.
 const ALLOWED = [".pdf", ".docx", ".xlsx", ".xlsm", ".png", ".jpg", ".jpeg", ".webp", ".bmp"];
@@ -125,20 +126,7 @@ export default function DropZone({ onFiles, disabled }: Props) {
       />
 
       <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-ink-600 bg-ink-800">
-        <svg
-          width="26"
-          height="26"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--color-amber)"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-          <path d="M12 11v5" />
-          <path d="M9.5 13.5 12 11l2.5 2.5" />
-        </svg>
+        <Icon name="folderUp" size={26} strokeWidth={1.6} className="text-amber" />
       </div>
 
       <p className="font-mono text-sm text-paper-50">

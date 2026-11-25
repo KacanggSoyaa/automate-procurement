@@ -79,3 +79,11 @@ body {
 .animate-pulse-dot {
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--color-amber) 70%, transparent);
+  outline-offset: 2px;
+}

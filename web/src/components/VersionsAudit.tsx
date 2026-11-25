@@ -1,5 +1,6 @@
 import { downloadVersionUrl } from "../api";
 import type { Job } from "../types";
+import Icon from "./Icon";
 
 const REASON_LABELS: Record<string, string> = {
   run: "Initial run",
@@ -57,11 +58,7 @@ export default function VersionsAudit({ job }: { job: Job }) {
                   className="ml-auto flex items-center gap-1.5 text-paper-200/70 transition hover:text-amber"
                   title={`Download ${v.tag} snapshot (zip)`}
                 >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 3v12" />
-                    <path d="m7 10 5 5 5-5" />
-                    <path d="M5 21h14" />
-                  </svg>
+                  <Icon name="download" size={13} />
                   download v{String(v.id).padStart(2, "0")}
                 </a>
               )}
